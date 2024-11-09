@@ -1,0 +1,6 @@
+[
+    {
+        "strategy": "binary",
+        "max_angles": 600
+    }
+]

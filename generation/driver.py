@@ -3,7 +3,7 @@ import json
 import numpy as np
 
 from typing import List
-from os import environ, listdir
+from os import environ, listdir, path
 
 from dataset import Data
 from reconstruction import Reconstruction
@@ -47,20 +47,23 @@ class GenerationExperiment:
     def get_angle_generator(self):
         if self.angles_strategy == "binary":
             return self.binary_angles_stratery
+        if self.angles_strategy == "random":
+            return self.random_angles_strategy
 
     def run_single_experiment(self, angles : np.ndarray, experiment_number, step):
         settings = self.data.settings
         reconstruction = Reconstruction(self.data)
-        reconstruction.calculate_projection(
-            settings["detector_spacing"],
-            settings["detector_count"],
-            angles
-        )
-        reconstruction.reconstruct(
-            settings["iterations"],
-            settings["algorithm"],
-        )
-        reconstruction.save_to_file(experiment_number, self.angles_strategy, angles, step)
+        if (not path.isdir(reconstruction.get_folder_name(experiment_number, self.angles_strategy))):
+            reconstruction.calculate_projection(
+                settings["detector_spacing"],
+                settings["detector_count"],
+                angles
+            )
+            reconstruction.reconstruct(
+                settings["iterations"],
+                settings["algorithm"],
+            )
+            reconstruction.save_to_file(experiment_number, self.angles_strategy, angles, step)
         del reconstruction
 
     def run_experiments(self):

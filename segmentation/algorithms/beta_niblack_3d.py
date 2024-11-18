@@ -6,14 +6,9 @@ from metrics import jaccard
 from imagedata import ImageData
 
 
-@jit()
-def thresholding(segmented, image,q, mean, std, beta):
-    for i in range(segmented.shape[0]):
-        for j in range(segmented.shape[1]):
-            for k in range(segmented.shape[2]):
-                segmented[i, j, k] = 1 if image[i, j, k] >= (mean[i, j, k] + q*std[i, j, k] + beta) else 0 
-
-    return segmented
+@jit(parallel = True)
+def thresholding(image,q, mean, std, beta):
+    return image >= (mean + q*std + beta)
 
 
 def segment(imageData : ImageData):
@@ -30,8 +25,7 @@ def segment(imageData : ImageData):
         means, stds = std_field[0, :, :, :], std_field[1, :, :, :]
         for a in tqdm.tqdm(range(betas.size)):
                 for i in range(ks.size):
-                    segmentation = np.zeros((image.shape[0], image.shape[1], image.shape[2])).astype(bool)
-                    segmentation = thresholding(segmentation, image, ks[i], means, stds, betas[a])
+                    segmentation = thresholding(image, ks[i], means, stds, betas[a])
                     mean_metric = 0
                     ground_truth_slice_amount = 0
                     for index, ground_truth_slice in imageData.get_ground_truth_slices():

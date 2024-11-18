@@ -2,3 +2,4 @@
 .matplotlib/
 /data/
 /ground_truth/
+*.pyc

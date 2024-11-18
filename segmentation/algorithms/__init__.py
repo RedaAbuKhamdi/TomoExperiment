@@ -1,1 +1,1 @@
-__all__ = ["beta_niblack_3d"]
+__all__ = ["beta_niblack_3d", "brute"]

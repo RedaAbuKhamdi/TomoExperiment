@@ -51,12 +51,15 @@ class Reconstruction:
         astra.algorithm.run(algorithm_id, iterations)
         astra.algorithm.delete(algorithm_id)
         return self.rec_id
+    
+    def get_folder_name(self, experiment_number : int, strategy : str):
+        return "./results/reconstructions/{0}/{1}/{2}".format(strategy, self.data.settings["name"] , experiment_number)
 
     def save_to_file(self, experiment_number : int, strategy : str, angles : np.array, step: str):
         if (self.rec_id is None):
             raise "No reconstruction has been run"
         reconstruction = astra.data3d.get(self.rec_id) if self.data.volumetric else astra.data2d.get(self.rec_id)
-        folder = "./results/reconstructions/{0}/{1}/{2}".format(strategy, self.data.settings["name"] , experiment_number)
+        folder = self.get_folder_name(experiment_number, strategy)
         os.makedirs(folder, exist_ok=True)
         io.imsave("{0}/reconstruction_experiment.tiff".format(folder),  reconstruction)
         np.save("{0}/image.npy".format(folder), reconstruction, False)

@@ -2,6 +2,7 @@ import numpy as np
 from numba import jit
 from scipy.ndimage.morphology import *
 
+
 @jit()
 def dice(segmentation : np.ndarray, 
              ground_truth : np.ndarray)->float:
@@ -24,10 +25,11 @@ def boundary(segmentation : np.ndarray,
     combined = np.logical_or(segmentation, ground_truth)
     obj_indicies = np.argwhere(combined == True)
     for index in obj_indicies:
-        if (( 0 in get_window(segmentation, index[0], index[1], index[2], window)) or
-         (0 in get_window(ground_truth, index[0], index[1], index[2], window))):
+        if (( np.any(get_window(segmentation, index[0], index[1], index[2], window) == 0) ) or
+         ( np.any(get_window(ground_truth, index[0], index[1], index[2], window) == 0))):
             yield index
 
+@jit()
 def evaluate(segmentation : np.ndarray, 
              ground_truth : np.ndarray)->float:
     radius = 5

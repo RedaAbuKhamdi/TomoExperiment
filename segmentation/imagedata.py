@@ -9,72 +9,38 @@ from PIL import Image
 from skimage import io
 
 @jit()
-def e_sd(window_sum, window_square_sum, size):
+def get_delta(image : np.ndarray, i, j, k, w):
+    x_left = 0 if i - w < 0 else image[i - w, j, k]
+    x_right = 0 if i + w >= image.shape[0] else image[i + w, j, k]
+    y_left = 0 if j - w < 0 else image[i, j - w, k]
+    y_right = 0 if j + w >= image.shape[1] else image[i, j + w, k]
+    z_left = 0 if k - w < 0 else image[i, j, k - w]
+    z_right = 0 if k + w >= image.shape[2] else image[i, j,  + w]
 
-    mean = window_sum/size
-    standard_deviation = (window_square_sum/size - mean**2)**0.5
-
-    return mean, standard_deviation
-
-
-@jit()
-def construct_cumulative_sum(result : np.ndarray, result_square : np.ndarray, image : np.ndarray):
-    for k in range(image.shape[2]):
-        for i in range(image.shape[0]):
-            for j in range(image.shape[1]):
-                if j == 0:
-                    result[i,j,k, 0] = image[i,j,k]
-                    result_square[i,j,k, 0] = image[i,j,k]**2
-                else:
-                    result[i, j,k,0] = result[i, j-1,k, 0] + image[i, j,k]
-                    result_square[i, j,k,0] = result_square[i, j-1, k,0] + image[i, j,k]**2
-                if i == 0:
-                    result[i, j,k,1] = result[i, j,k, 0]
-                    result_square[i, j,k,1] = result_square[i, j,k, 0]
-                else:
-                    result[i, j, k,1] = result[i-1, j, k,1] + result[i, j,k, 0]
-                    result_square[i, j,k, 1] = result_square[i-1, j, k,1] + result_square[i, j,k, 0]
-    
-    return result, result_square
-
-@jit()
-def window_sum(shape, slice_cumulative_rows, slice_cumulative_cols, i, j, k, w):
-    
-    res = 0
-    
-    for z in range(
-        np.max(np.array([k-w, 0])), 
-        np.min(np.array([k+w+1, shape[2]]))
-        ):
-        cumulative_cols = slice_cumulative_cols[:,:,z]
-        cumulative_rows = slice_cumulative_rows[:,:,z]
-        right_down_corner = (np.min(np.array([i + w, shape[0]-1])), np.min(np.array([j + w, shape[1]-1])))
-        left_down_corner = (np.min(np.array([i + w, shape[0] - 1])) ,  np.max(np.array([j - w, 0])))
-        left_up_corner = (np.max(np.array([i - w, 0])), np.max(np.array([j - w, 0])))
-        right_up_corner = (np.max(np.array([i - w, 0])),  np.min(np.array([j + w, shape[1] - 1])))
-        res = cumulative_cols[right_down_corner] - (cumulative_cols[right_up_corner[0]-1, right_up_corner[1]] if right_up_corner[0]-1 >= 0 else 0)
-        res += - ( cumulative_cols[left_down_corner[0], left_down_corner[1]-1] if 
-                left_down_corner[1] - 1 >= 0 and j - w >= 0 else 0) + (
-            cumulative_cols[left_up_corner[0]-1, left_up_corner[1]-1] if 
-            left_up_corner[0]-1 >= 0 and left_up_corner[1]-1 >= 0 and j - w >= 0 else 0)
-    return res
+    return -x_left + x_right - y_left + y_right - z_left + z_right,  -(x_left**2) + x_right**2 - y_left**2 + y_right**2 - z_left**2 + z_right**2
 
 @jit()
 def calculate_fixed_window_e_sd_field(image : np.ndarray, 
-                                    w : int, cumulative_sum : np.ndarray, 
-                                    cumulative_square_sum : np.ndarray):
+                                    w : int):
     std_field = np.zeros((2, image.shape[0], image.shape[1], image.shape[2]))
+    
     shape = image.shape
-    for k in range(image.shape[2]):
-        for i in range(image.shape[0]):
-            for j in range(image.shape[1]):
-                right_down_corner = (np.min(np.array([i + w, shape[0]-1])), np.min(np.array([j + w, shape[1]-1])), np.min(np.array([k + w, shape[2]-1])))
-                left_up_corner = (np.max(np.array([i - w, 0])), np.max(np.array([j - w, 0])), np.max(np.array([k - w, 0])))
-                psize = (right_down_corner[0] - left_up_corner[0] + 1)*(right_down_corner[1] - left_up_corner[1] + 1)*(right_down_corner[2] - left_up_corner[2] + 1)
-                m, sd = e_sd(window_sum(shape, cumulative_sum[:,:,:,0], cumulative_sum[:,:,:,1], i, j,k, w),
-                            window_sum(shape, cumulative_square_sum[:,:,:,0], cumulative_square_sum[:,:,:,1], i, j,k, w), psize)
-                std_field[0, i, j, k] = m
-                std_field[1, i, j, k] = sd
+    n = shape[0] * shape[1] * shape[2]
+    w_sum = np.sum(image[0:w, 0:w, 0:w])
+    w_square_sum = np.sum(image[0:w, 0:w, 0:w]**2)
+    std_field[0, 0, 0, 0] = w_sum / n
+    std_field[1, 0, 0, 0] = (w_square_sum / n - std_field[0, 0, 0, 0]**2)**0.5
+    
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            for k in range(image.shape[2]):
+                if (i + j + k == 0):
+                    continue
+                delta, squared_delta = get_delta(image, i, j, k, w)
+                w_sum += delta
+                w_square_sum += squared_delta
+                std_field[0, i, j, k] = w_sum / n
+                std_field[1, i, j, k] = (w_square_sum / n - std_field[0,  i, j, k]**2)**0.5
     return std_field
 
 class ImageData:
@@ -111,21 +77,13 @@ class ImageData:
 
     def get_window_e_sd_field(self, window : int):
         print("Calculation of e sd field for window {}".format(window))
-        c_sum = np.zeros((
-            self.image.shape[0],
-            self.image.shape[1],
-            self.image.shape[2],
-            2))
-        c_square_sum = np.zeros((
-            self.image.shape[0],
-            self.image.shape[1],
-            self.image.shape[2],
-            2))
-        c_sum, c_square_sum = construct_cumulative_sum(c_sum, c_square_sum, self.image)
-        return calculate_fixed_window_e_sd_field(self.image, window, c_sum, c_square_sum)
+        return calculate_fixed_window_e_sd_field(self.image, window)
     
+    def get_folder(self, algorithm):
+        return "./results/binarizations/{0}/{1}".format(algorithm, self.path)
+
     def save_result(self, segmentation : np.ndarray, params : dict, algorithm : str):
-        folder = "./results/binarizations/{0}/{1}".format(algorithm, self.path)
+        folder = self.get_folder(algorithm)
         os.makedirs(folder, exist_ok=True)
         io.imsave("{0}/segmentation.tiff".format(folder),  segmentation)
         with open("{}/parameters.json".format(folder), "w") as f:

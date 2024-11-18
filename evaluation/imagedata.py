@@ -46,9 +46,12 @@ class ImageData:
             segmentation.append(self.image[index])
             ground_truth.append(gt)
         return np.array(segmentation), np.array(ground_truth)
+    
+    def get_folder(self, algorithm):
+        return "./results/binarizations/{0}/{1}".format(algorithm, self.path)
 
     def save_result(self, segmentation : np.ndarray, params : dict, algorithm : str):
-        folder = "./results/binarizations/{0}/{1}".format(algorithm, self.path)
+        folder = self.get_folder(algorithm)
         os.makedirs(folder, exist_ok=True)
         io.imsave("{0}/segmentation.tiff".format(folder),  segmentation)
         np.save("{0}/segmentation.npy".format(folder), segmentation, False)

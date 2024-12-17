@@ -1,7 +1,7 @@
 import numpy as np
-from numba import jit
+from numba import njit
 
-@jit
+@njit
 def jaccard(segmentation : np.ndarray, 
              ground_truth : np.ndarray)->float:
     

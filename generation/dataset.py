@@ -55,12 +55,15 @@ class Data:
             self.sinogram_id = astra.create_sino(image, projector, returnData = False)
         return self.sinogram_id
     def __del__(self):
-        if self.volumetric:
-            astra.data3d.delete(self.data_id)
-            astra.data3d.delete(self.sinogram_id)
-        else:
-            astra.data2d.delete(self.data_id)
-            astra.data2d.delete(self.sinogram_id)
+        try:
+            if self.volumetric:
+                astra.data3d.delete(self.data_id)
+                astra.data3d.delete(self.sinogram_id)
+            else:
+                astra.data2d.delete(self.data_id)
+                astra.data2d.delete(self.sinogram_id)
+        except:
+            print("Dataset {} did not need reconstruction".format(self.settings["name"]))
     def get_volume_geometry(self):
         return self.data_geometry
     def save_settings(self, path : str, angles : np.ndarray, strategy : str, step : str):

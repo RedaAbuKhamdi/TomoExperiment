@@ -1,22 +1,56 @@
 import json
 import pandas as pd
+import numpy as np
 
 from os import environ, listdir, makedirs
-from matplotlib import pyplot
+from matplotlib import pyplot as plt
 
 
 data_paths = json.loads(environ["paths"])
 prefix = environ["prefix"]
+metrics = ["iou", "boundarydice", "normalizedhausdorff"]
+algorithms = ["beta_niblack_3d", "brute"]
+plotData = {
+    "beta_niblack_3d": {
+        "iou" : [],
+        "boundarydice" : [],
+        "normalizedhausdorff" : []
+    },
+    "brute": {
+        "iou" : [],
+        "boundarydice" : [],
+        "normalizedhausdorff" : []
+    }
+}
 for dataset_path in data_paths:
     data = pd.read_csv(
         prefix + dataset_path + "/metrics.csv",
         header = 0, index_col= 0
-    )
+    ).sort_index(axis = 1, key = lambda x : [int(el) for el in x])
+    algorithm = dataset_path.split("/")[0]
     folder = "./results/report/{0}".format(dataset_path)
-    makedirs(folder, exist_ok=True)
-    plot = data.T.plot(
-        title="Metrics for {}".format(dataset_path.split("/")[-1]),
-        xlabel = "Angle step",
-        ylabel = "Metric value"
-        )
-    plot.get_figure().savefig(folder + "/" + "metrics_plot.png")
+    for metric, series in data.iterrows():
+        plotData[algorithm][metric].append({
+            "name": dataset_path,
+            "data": series
+        })
+
+for algorithm in plotData:
+    for metric in plotData[algorithm]:
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        for i in range(len(plotData[algorithm][metric])):
+            dataset = plotData[algorithm][metric][i]
+            series = dataset["data"]
+            number_of_angles = []
+            for index in range(len(series)):
+                name = dataset["name"].split("/")[2]
+                reconstruction_scheme = dataset["name"].split("/")[1]
+                with open( "./results/reconstructions/" + reconstruction_scheme + "/" + name + "/" + str(index) + "/settings.json", "r") as f:
+                    settings = json.loads(f.read())
+                    number_of_angles.append(len(settings["angles"]["values"]))
+            ax.plot(np.array(number_of_angles), series.to_numpy(), label = dataset["name"].replace(algorithm + "/", ""))
+        fig.set_dpi(400)
+        plt.title(metric)
+        plt.legend()
+        plt.savefig("./results/report/" + algorithm + "_" + metric +".png")

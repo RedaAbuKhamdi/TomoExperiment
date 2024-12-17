@@ -3,3 +3,4 @@
 /data/
 /ground_truth/
 *.pyc
+/segmentation/algorithms/__pycache__/

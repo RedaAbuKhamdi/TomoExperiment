@@ -11,7 +11,6 @@ from math import pi
 
 class GenerationExperiment:
     def __init__(self, data_path : str):
-        print([data_path + "/" + p for p in listdir(data_path)])
         self.data = Data([data_path + "/" + p for p in listdir(data_path)])
         self.parse_angle_settings()
 
@@ -24,6 +23,7 @@ class GenerationExperiment:
             else:
                 self.max_angles = 1000
             self.step = settings.get("step", "")
+            print("step = ", self.step)
         except: 
             raise "Incorrect angle settings provided in enviroment variables"
 
@@ -38,10 +38,13 @@ class GenerationExperiment:
         angles = np.array([0, pi / 2, pi, 3*pi / 2])
         full_angles = np.linspace(0, 2 * pi, self.max_angles, False)
 
-        while number_of_angles < self.max_angles:
+        while True:
             missing_angles = np.setdiff1d(full_angles, angles)
-            angles = np.concatenate(angles, np.random.choice(missing_angles, self.step, False))
-            yield angles
+            if missing_angles.size <= self.step:
+                break
+            chosen_angles = np.random.choice(missing_angles, self.step, False)
+            angles = np.concatenate((angles, chosen_angles))
+            yield angles.sort(), self.step
         
 
     def get_angle_generator(self):
@@ -52,8 +55,8 @@ class GenerationExperiment:
 
     def run_single_experiment(self, angles : np.ndarray, experiment_number, step):
         settings = self.data.settings
-        reconstruction = Reconstruction(self.data)
-        if (not path.isdir(reconstruction.get_folder_name(experiment_number, self.angles_strategy))):
+        if (not path.isdir(Reconstruction.get_folder_name(self.data.settings["name"], experiment_number, self.angles_strategy))):
+            reconstruction = Reconstruction(self.data)
             reconstruction.calculate_projection(
                 settings["detector_spacing"],
                 settings["detector_count"],
@@ -64,7 +67,7 @@ class GenerationExperiment:
                 settings["algorithm"],
             )
             reconstruction.save_to_file(experiment_number, self.angles_strategy, angles, step)
-        del reconstruction
+            del reconstruction
 
     def run_experiments(self):
         i = 0
@@ -76,6 +79,6 @@ class GenerationExperiment:
 
 data_paths = json.loads(environ["paths"])
 
-for path in data_paths:
-    experiment = GenerationExperiment(path)
+for data_path in data_paths:
+    experiment = GenerationExperiment(data_path)
     experiment.run_experiments()

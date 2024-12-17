@@ -12,7 +12,6 @@ class ImageData:
         self.path = path
         image_path = prefix + path
         self.image = io.imread("{0}/segmentation.tiff".format(image_path))
-        self.image = self.image.transpose(2, 0, 1)
         self.parse_settings(("{0}/parameters.json".format(image_path)))
         self.load_ground_truth()
 

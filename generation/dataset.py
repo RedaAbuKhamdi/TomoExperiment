@@ -1,5 +1,6 @@
 import astra
 import json
+import re
 
 import numpy as np
 
@@ -7,9 +8,12 @@ from PIL import Image
 from typing import List
 
 SAVE_SETTINGS_KEYWORDS = [
-    "groud_truth_path",
     "name"
 ]
+
+def natural_sort_key(s, _nsre=re.compile(r'(\d+)')):
+    return [int(text) if text.isdigit() else text.lower()
+            for text in _nsre.split(s)]
 
 class Data:
     def __init__(self, image_paths : List[str]) -> None:
@@ -18,6 +22,7 @@ class Data:
             raise "More than one setting files found!" if len(settings_matches) > 1 else "No settings file found!"
         self.parse_settings(image_paths.pop(settings_matches[0]))
         self.n = len(image_paths)
+        image_paths.sort(key=natural_sort_key)
         self.volumetric = self.n > 1
         self._create_image_with_geometry(image_paths)
 

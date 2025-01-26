@@ -23,7 +23,6 @@ class GenerationExperiment:
             else:
                 self.max_angles = 1000
             self.step = settings.get("step", "")
-            print("step = ", self.step)
         except: 
             raise "Incorrect angle settings provided in enviroment variables"
 
@@ -37,14 +36,14 @@ class GenerationExperiment:
         number_of_angles = 4
         angles = np.array([0, pi / 2, pi, 3*pi / 2])
         full_angles = np.linspace(0, 2 * pi, self.max_angles, False)
-
         while True:
             missing_angles = np.setdiff1d(full_angles, angles)
             if missing_angles.size <= self.step:
                 break
             chosen_angles = np.random.choice(missing_angles, self.step, False)
             angles = np.concatenate((angles, chosen_angles))
-            yield angles.sort(), self.step
+            angles.sort()
+            yield angles, self.step
         
 
     def get_angle_generator(self):

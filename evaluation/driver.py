@@ -8,7 +8,7 @@ from imagedata import ImageData
 from os import environ, listdir, makedirs, path
 from tqdm import tqdm
 
-CORES = 4
+CORES = 2
 def calculate_metrics(experiment : str, prefix : str, dataset_path : str):
     image = ImageData(prefix, "{}/{}".format(dataset_path, experiment))
     segmentation, ground_truth = image.get_data()

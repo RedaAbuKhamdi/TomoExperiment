@@ -24,27 +24,37 @@ def generate_synthetic_dataset(n):
                     image[k, i, j] += color if ((i - center[0][0])/a) ** 2 + ((j - center[0][1])/b) ** 2 + ((k - center[0][2])/c) ** 2 <= 1 else 0
     return image
 
+def save_dataset(image):
+    folder = "../data/ellipses"
+    os.makedirs(folder, exist_ok=True)
+
+    for k in range(image.shape[0]):
+        slice = PIL.Image.fromarray(np.uint8(image[k] + np.random.normal(20, 5, image[k].shape)) , 'L')
+        slice.save(folder + "/" + str(k) + ".png")
+
+    with open(folder + "/settings.json", "w") as f:
+        f.write(json.dumps({
+        "name": "ellipses",
+        "detector_spacing": {
+            "x": 2.1,
+            "y": 2.1
+        },
+        "detector_count": {
+            "rows": 400,
+            "columns": 400
+        },
+        "iterations": 200,
+        "algorithm": "SIRT3D_CUDA"
+    }))
+    
+def save_ground_truth(image):
+    folder = "../ground_truth/ellipses"
+    os.makedirs(folder, exist_ok=True)
+    for k in range(image.shape[0]):
+        slice = PIL.Image.fromarray(np.uint8((image[k] > 0) * (255)) , 'L')
+        slice.save(folder + "/" + str(k) + ".png")
+
 image = generate_synthetic_dataset(8)
 
-folder = "../data/ellipses"
-os.makedirs(folder, exist_ok=True)
-
-for k in range(image.shape[0]):
-    slice = PIL.Image.fromarray(np.uint8(image[k]) , 'L')
-    slice.save(folder + "/" + str(k) + ".png")
-
-with open(folder + "/settings.json", "w") as f:
-    f.write(json.dumps({
-    "name": "ellipses",
-    "detector_spacing": {
-        "x": 2.1,
-        "y": 2.1
-    },
-    "detector_count": {
-        "rows": 400,
-        "columns": 400
-    },
-    "iterations": 200,
-    "algorithm": "SIRT3D_CUDA",
-    "groud_truth_path": "C:\\Study AM\\cog-tech\\Experiment\\ground_truth\\ellipses"
-}))
+save_ground_truth(image)
+save_dataset(image)

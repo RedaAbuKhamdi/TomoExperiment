@@ -1,5 +1,5 @@
 import json, subprocess, sys
-from os import environ, listdir, getcwd
+from os import environ, listdir, getcwd, remove
 dataset_paths = json.dumps(["./data/" + path  for path in listdir("./data")])
 reconstructions_directory = "./results/reconstructions/"
 binarization_directory = "./results/binarizations/"
@@ -61,6 +61,18 @@ def run_visualization():
     env_for_visualization["prefix"] = evaluation_directory
     return subprocess.run(["python", "./visualization/driver.py"], env=env_for_visualization)
 
+def clean_up():
+    folder = reconstructions_directory
+    search =  ["cumsum.npy", "square_cumsum.npy", "mean", "std"]
+    for experiment in listdir(folder):
+        for dataset in  listdir("{}/{}".format(folder, experiment)):
+            for angle in listdir("{}/{}/{}".format(folder, experiment, dataset)):
+                for file in listdir("{}/{}/{}/{}".format(folder, experiment, dataset, angle)):
+                    for s in search:
+                        if s in file:
+                            print("{}/{}/{}/{}/{}".format(folder, experiment, dataset, angle, file))
+                            remove("{}/{}/{}/{}/{}".format(folder, experiment, dataset, angle, file))
+
 if len(sys.argv) > 1:
     for i in range(len(settings)):
         if "1" in sys.argv[1]:
@@ -71,3 +83,5 @@ if len(sys.argv) > 1:
             run_evaluation()
         if "4" in sys.argv[1]:
             run_visualization()
+        if "clean" in sys.argv[1]:
+            clean_up() 

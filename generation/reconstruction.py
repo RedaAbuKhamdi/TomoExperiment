@@ -62,7 +62,6 @@ class Reconstruction:
         folder = Reconstruction.get_folder_name(self.data.settings['name'], experiment_number, strategy)
         os.makedirs(folder, exist_ok=True)
         io.imsave("{0}/reconstruction_experiment.tiff".format(folder),  reconstruction)
-        np.save("{0}/image.npy".format(folder), reconstruction, False)
         self.data.save_settings(folder, angles, strategy, step)
     
     def clean_up(self):

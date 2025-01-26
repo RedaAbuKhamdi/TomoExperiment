@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 data_paths = json.loads(environ["paths"])
 prefix = environ["prefix"]
 metrics = ["iou", "boundarydice", "normalizedhausdorff"]
-algorithms = ["beta_niblack_3d", "brute"]
+algorithms = ["beta_niblack_3d", "brute", "niblack_3d"]
 plotData = {
     "beta_niblack_3d": {
         "iou" : [],
@@ -17,6 +17,11 @@ plotData = {
         "normalizedhausdorff" : []
     },
     "brute": {
+        "iou" : [],
+        "boundarydice" : [],
+        "normalizedhausdorff" : []
+    },
+    "niblack_3d": {
         "iou" : [],
         "boundarydice" : [],
         "normalizedhausdorff" : []

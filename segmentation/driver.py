@@ -2,9 +2,12 @@ from imagedata import ImageData
 import algorithms
 import importlib
 import json
+import re
 from os import environ, listdir, path
-
-data_paths = json.loads(environ["paths"])
+def natural_sort_key(s, _nsre=re.compile(r'(\d+)')):
+    return [int(text) if text.isdigit() else text.lower()
+            for text in _nsre.split(s)]
+data_paths = sorted(json.loads(environ["paths"]), key=natural_sort_key)
 prefix = environ["prefix"]
 for data_path in data_paths:
     data = ImageData(prefix, data_path)

@@ -10,16 +10,15 @@ def thresholding(image : np.ndarray, q  : int, mean : np.ndarray, std : np.ndarr
     return image >= (mean + std * q + beta)
 
 def segment(imageData : ImageData):
-    print("Start Niblack")
     shape = imageData.image.shape
     image = imageData.image
-    ks, w, betas = np.linspace(-2, 2, 24), max([1, min(min(shape)//2, 80)]), np.linspace(np.min(image), np.mean(image), 30)
+    ks, w, betas = np.linspace(-2, 2, 24), max([1, min(min(shape)//2, 250)]), np.linspace(np.min(image), np.mean(image), 30)
     best_val = 0
     best_k = 0
     best_image = None
     best_beta = 0
-    best_window = 5
-    windows = np.arange(5, w, (w-5) // 8, dtype=np.int16)
+    best_window = 10
+    windows = np.arange(best_window, w, (w-best_window) // 8, dtype=np.int16)
     for window in tqdm.tqdm(windows):
         means, stds = imageData.get_e_sd(window)
         stds = np.sqrt(np.abs(stds))

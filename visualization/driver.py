@@ -8,24 +8,8 @@ from matplotlib import pyplot as plt
 
 data_paths = json.loads(environ["paths"])
 prefix = environ["prefix"]
-metrics = ["iou", "boundarydice", "normalizedhausdorff"]
-algorithms = ["beta_niblack_3d", "brute", "niblack_3d"]
 plotData = {
-    "beta_niblack_3d": {
-        "iou" : [],
-        "boundarydice" : [],
-        "normalizedhausdorff" : []
-    },
-    "brute": {
-        "iou" : [],
-        "boundarydice" : [],
-        "normalizedhausdorff" : []
-    },
-    "niblack_3d": {
-        "iou" : [],
-        "boundarydice" : [],
-        "normalizedhausdorff" : []
-    }
+
 }
 for dataset_path in data_paths:
     data = pd.read_csv(
@@ -33,8 +17,12 @@ for dataset_path in data_paths:
         header = 0, index_col= 0
     ).sort_index(axis = 1, key = lambda x : [int(el) for el in x])
     algorithm = dataset_path.split("/")[0]
+    if algorithm not in plotData.keys():
+        plotData[algorithm] = {}
     folder = "./results/report/{0}".format(dataset_path)
     for metric, series in data.iterrows():
+        if metric not in plotData[algorithm].keys():
+            plotData[algorithm][metric] = []
         plotData[algorithm][metric].append({
             "name": dataset_path,
             "data": series

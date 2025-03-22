@@ -27,13 +27,16 @@ class GenerationExperiment:
             raise "Incorrect angle settings provided in enviroment variables"
 
     def binary_angles_stratery(self):
+        # Check that step is not less than 2*pi / (max_angles)
         step = pi / 2
         while 2*pi / step < self.max_angles:
             yield np.arange(0, 2*pi, step), step
             step /= 2
-    
+    # Set one strategy for now
     def random_angles_strategy(self):
         number_of_angles = 4
+        # redo  (simpler - shuffle array)
+        # Add angles to existing for each experiment 
         angles = np.array([0, pi / 2, pi, 3*pi / 2])
         full_angles = np.linspace(0, 2 * pi, self.max_angles, False)
         while True:

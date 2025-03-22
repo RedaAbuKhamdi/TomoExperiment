@@ -26,7 +26,11 @@ class ImageData:
 
     def load_ground_truth(self):
         try:
-            ground_truth_path = config.GROUND_TRUTH_PATH / self.settings["name"]
+            print(self.settings["ground_truth_path"].split("\\")[-1])
+            if "name" in self.settings.keys():
+                ground_truth_path = config.GROUND_TRUTH_PATH / self.settings["name"]
+            else:
+                ground_truth_path = config.GROUND_TRUTH_PATH / self.path.split("/")[-2]
             ground_truth_slices = {}
             for file in os.listdir(ground_truth_path):
                 index = int(re.findall(r"\d+", file)[0])

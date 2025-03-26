@@ -8,42 +8,43 @@ from matplotlib import pyplot as plt
 
 data_paths = json.loads(environ["paths"])
 prefix = environ["prefix"]
-plotData = {
+plotData = {}
 
-}
 for dataset_path in data_paths:
     data = pd.read_csv(
         prefix + dataset_path + "/metrics.csv",
         header = 0, index_col= 0
     ).sort_index(axis = 1, key = lambda x : [int(el) for el in x])
+
     algorithm = dataset_path.split("/")[0]
-    if algorithm not in plotData.keys():
-        plotData[algorithm] = {}
-    folder = "./results/report/{0}".format(dataset_path)
+    name = dataset_path.split("/")[-1]
+
+    if name not in plotData.keys():
+        plotData[name] = {}
+    plotData[name][algorithm] = {}
+
     for metric, series in data.iterrows():
-        if metric not in plotData[algorithm].keys():
-            plotData[algorithm][metric] = []
-        plotData[algorithm][metric].append({
+        plotData[name][algorithm][metric] = {
             "name": dataset_path,
             "data": series
-        })
+        }
 
-for algorithm in plotData:
-    for metric in plotData[algorithm]:
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        for i in range(len(plotData[algorithm][metric])):
-            dataset = plotData[algorithm][metric][i]
-            series = dataset["data"]
+for dataset in plotData:
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    for algorithm in plotData[dataset]:
+        for i, metric in enumerate(plotData[dataset][algorithm]):
+            current_data = plotData[dataset][algorithm][metric]
+            series = current_data["data"]
             number_of_angles = []
             for index in range(len(series)):
-                name = dataset["name"].split("/")[2]
-                reconstruction_scheme = dataset["name"].split("/")[1]
+                name = current_data["name"].split("/")[2]
+                reconstruction_scheme = current_data["name"].split("/")[1]
                 with open( "./results/reconstructions/" + reconstruction_scheme + "/" + name + "/" + str(index) + "/settings.json", "r") as f:
                     settings = json.loads(f.read())
                     number_of_angles.append(len(settings["angles"]["values"]))
-            ax.plot(np.array(number_of_angles), series.to_numpy(), label = dataset["name"].replace(algorithm + "/", ""))
-        fig.set_dpi(400)
-        plt.title(metric)
-        plt.legend()
-        plt.savefig("./results/report/" + algorithm + "_" + metric +".png")
+            ax.scatter(np.array(number_of_angles), series.to_numpy(), label = algorithm + "_" + metric)
+    fig.set_dpi(400)
+    plt.title(dataset)
+    plt.legend()
+    plt.savefig("./results/report/" + dataset + ".png")

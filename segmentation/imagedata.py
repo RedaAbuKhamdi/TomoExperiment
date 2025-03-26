@@ -45,7 +45,7 @@ class ImageData:
     def __init__(self, prefix, path):
         self.path = path
         self.prefix = prefix
-        image_path = prefix + path
+        self.image_path = image_path = prefix + path
         self.image = io.imread("{0}/reconstruction_experiment.tiff".format(image_path)).astype(np.float32)
         self.parse_settings(("{0}/settings.json".format(image_path)))
         print(path)
@@ -64,7 +64,7 @@ class ImageData:
             ground_truth_slices = {}
             for file in os.listdir(ground_truth_path):
                 index = int(re.findall(r"\d+", file)[0])
-                ground_truth_slices[index] = np.asarray(Image.open("{}\\{}".format(ground_truth_path, file)))
+                ground_truth_slices[index] = np.asarray(Image.open("{}/{}".format(ground_truth_path, file)))
             self.ground_truth_slices = ground_truth_slices
         except:
             raise Exception("Error loading ground truth")
@@ -85,8 +85,15 @@ class ImageData:
         os.makedirs(folder, exist_ok=True)
         io.imsave("{0}/segmentation.tiff".format(folder),  segmentation)
         with open("{}/parameters.json".format(folder), "w") as f:
-            params["ground_truth_path"] = self.settings["groud_truth_path"]
             f.write(json.dumps(params))
+
+    def check_if_done(self, algorithm : str):
+        folder = self.get_folder(algorithm)
+        if (path.isfile("{}/parameters.json".format(folder))):
+            with open("{}/parameters.json".format(folder), "r") as f:
+                return json.loads(f.read())
+        else:
+            return None
     def get_e_sd(self, window : int):
         path = self.prefix + self.path
         print("window {0}".format(window))

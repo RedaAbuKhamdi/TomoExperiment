@@ -1,11 +1,6 @@
 [
     {
-        "strategy": "random",
-        "max_angles": 1100,
-        "step": 30
-    },
-    {
         "strategy": "binary",
-        "max_angles": 2048
+        "max_angles": 1024
     }
 ]

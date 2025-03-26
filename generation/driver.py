@@ -8,6 +8,7 @@ from os import environ, listdir, path
 from dataset import Data
 from reconstruction import Reconstruction
 from math import pi
+from tqdm import tqdm
 
 class GenerationExperiment:
     def __init__(self, data_path : str):
@@ -74,13 +75,13 @@ class GenerationExperiment:
     def run_experiments(self):
         i = 0
         angle_generator = self.get_angle_generator()
-        for angles, step in angle_generator():
+        for angles, step in tqdm(angle_generator()):
             self.run_single_experiment(angles, i, step)
             i += 1
 
 
 data_paths = json.loads(environ["paths"])
-
+print("Started")
 for data_path in data_paths:
     experiment = GenerationExperiment(data_path)
     experiment.run_experiments()

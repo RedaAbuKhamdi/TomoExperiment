@@ -2,51 +2,74 @@ import metrics
 import importlib
 import json
 import pandas as pd
-import concurrent.futures as cf
+import sys
 
 from imagedata import ImageData
 from os import environ, listdir, makedirs, path
 from tqdm import tqdm
 
-CORES = 4
-def calculate_metrics(experiment : str, prefix : str, dataset_path : str):
-    image = ImageData(prefix, "{}/{}".format(dataset_path, experiment))
+sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
+import config
+
+def calculate_metrics_ground_truth(data : dict, image : ImageData):
     segmentation, ground_truth = image.get_data()
-    data = {}
     for metric in metrics.__all__:
-        print("metric {}, experiment {}".format(metric, experiment), segmentation.shape, ground_truth.shape)
-        data[metric] = importlib.import_module("metrics.{}".format(metric)).evaluate(
+        metric_value = importlib.import_module("metrics.{}".format(metric)).evaluate(
             segmentation,
             ground_truth
         )
-    return (experiment, data)
+        if metric not in data.keys():
+            data[metric] = []
+        data[metric].append(metric_value)
 
-def parallel_calculate_metrics(prefix : str, dataset_path : str):
-    with cf.ProcessPoolExecutor(max_workers=CORES) as executor:
-        futures = [executor.submit(calculate_metrics, experiment, prefix, dataset_path) for experiment in listdir(prefix + dataset_path)]
-        cf.wait(futures)
-        results = [future.result() for future in futures]
-    return results
-def sequential_calculate_metrics(prefix : str, dataset_path : str):
-    results = []
-    for experiment in listdir(prefix + dataset_path):
-        results.append(calculate_metrics(experiment, prefix, dataset_path))
-    return results
+def calculate_metrics_neighbor(data : dict, image1 : ImageData, image2 : ImageData):
+    for metric in metrics.__all__:
+        metric_value = importlib.import_module("metrics.{}".format(metric)).evaluate(
+            image1.image,
+            image2.image
+        )
+        if metric not in data.keys():
+            data[metric] = []
+        data[metric].append(metric_value)
+
+def iterate_datasets(data_paths : list):
+    datasets = {}
+    for dataset_path in tqdm(data_paths):
+        strategy = dataset_path.split("/")[-3]
+        name = dataset_path.split("/")[-2]
+        print(dataset_path)
+        folder = "./results/evaluation/{0}/{1}".format(strategy, name)
+        if not path.isdir(folder):
+            if name not in datasets.keys():
+                datasets[name] = {}
+            for algorithm in listdir(dataset_path):
+                if algorithm not in datasets[name].keys():
+                    datasets[name][algorithm] = []
+                datasets[name][algorithm].append("{}/{}".format(dataset_path, algorithm))
+    return datasets 
+
+def save_result(data : pd.DataFrame, save_path, name : str):
+    makedirs(save_path, exist_ok=True)
+    data.to_csv("{}/{}.csv".format(save_path, name))
+
+def run_evaluations(dataset : list, name : str, algorithm : str):
+    data_gt = {}
+    angles = []
+    data_neighbor = {}
+    for i, experiment_image in tqdm(enumerate(dataset), "Evaluating dataset " + name + " with algorithm " + algorithm):
+        calculate_metrics_ground_truth(data_gt, experiment_image)
+        angles.append(experiment_image.settings["angles"])
+        if (i > 0):
+            calculate_metrics_neighbor(data_neighbor, experiment_image, dataset[i - 1])
+    return data_gt, angles, data_neighbor
+
 if __name__ == "__main__":
     data_paths = json.loads(environ["paths"])
-    prefix = environ["prefix"]
-    parallel = environ["parallel"] if "parallel" in environ.keys() else False
-    for dataset_path in tqdm(data_paths):
-        print("Evaluating dataset {}".format(dataset_path))
-        folder = "./results/evaluation/{0}".format(dataset_path)
-        if not path.isdir(folder):
-            data = {}
-            results = parallel_calculate_metrics(prefix, dataset_path) if parallel else sequential_calculate_metrics(prefix, dataset_path)
-            for experiment, metrics_Data in results:
-                data[experiment] = metrics_Data
-            data = pd.DataFrame(data)
-            
-            makedirs(folder, exist_ok=True)
-            data.to_csv("{}/metrics.csv".format(folder))
-        else:
-            print("Dataset {} already evaluated".format(dataset_path))
+    datasets = iterate_datasets(data_paths)
+    for i, name in tqdm(enumerate(datasets.keys()), "Evaluating datasets"):
+        for algorithm in datasets[name].keys():
+            dataset = [ImageData(datasets[name][algorithm][i]) for i in range(len(datasets[name][algorithm]))]
+            save_path = config.EVALUATION_PATH / dataset[0].strategy / name
+            data_gt, angles, data_neighbor = run_evaluations(dataset, name, algorithm)
+            save_result(pd.DataFrame(data_gt, index = angles), save_path, "ground_truth_metrics")
+            save_result(pd.DataFrame(data_neighbor), save_path, "neighbor_metrics")

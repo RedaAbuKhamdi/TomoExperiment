@@ -8,11 +8,10 @@ def natural_sort_key(s, _nsre=re.compile(r'(\d+)')):
     return [int(text) if text.isdigit() else text.lower()
             for text in _nsre.split(s)]
 data_paths = sorted(json.loads(environ["paths"]), key=natural_sort_key)
-prefix = environ["prefix"]
 used_algorithms = set(json.loads(environ["algorithms"]))
 parameters = {}
 for index, data_path in enumerate(reversed(data_paths)):
-    data = ImageData(prefix, data_path)
+    data = ImageData(data_path)
     if (data.settings["name"] not in parameters.keys()):
         parameters[data.settings["name"]] = {}
     for algorithm in used_algorithms.intersection(algorithms.__all__):

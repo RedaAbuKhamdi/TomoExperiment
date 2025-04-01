@@ -1,17 +1,15 @@
 import json
-import os 
-import re
 import sys
+import os
 
 import numpy as np
 
-from PIL import Image
 from skimage import io
 from numba import jit
-from os import path
+from os import path, makedirs
 
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
-import config
+from common.imagedata import ImageDataBase
 
 @jit(nopython = True)
 def get_sum(prefix_sum, i, j, k, w):
@@ -41,48 +39,65 @@ def calculate_e_sd_field(prefix_sums : np.ndarray,
                 stds[k, i, j] = get_sum(prefix_sums_squared, i, j, k, window) / window ** 3 - means[k, i, j] ** 2
     return means, stds
 
-class ImageData:
-    def __init__(self, prefix, path):
-        self.path = path
-        self.prefix = prefix
-        self.image_path = image_path = prefix + path
-        self.image = io.imread("{0}/reconstruction_experiment.tiff".format(image_path)).astype(np.float32)
-        self.parse_settings(("{0}/settings.json".format(image_path)))
-        print(path)
-        self.prefix_sum = np.cumsum(np.cumsum(self.image, axis = 2), axis = 1)
-        self.square_prefix_sum = np.cumsum(np.cumsum(self.image ** 2, axis = 2), axis = 1)
-        self.load_ground_truth()
-            
 
-    def parse_settings(self, path):
-        with open(path, "r") as f:
-            self.settings = json.loads(f.read())
+@jit(nopython=True, fastmath=True)
+def compute_prefix_sums(image: np.ndarray):
+    """
+    Compute the 3D integral image (prefix sum) and the 3D square integral image
+    for a given 3D image, with output arrays of shape (D, H, W).
 
-    def load_ground_truth(self):
-        try:
-            ground_truth_path = config.GROUND_TRUTH_PATH / self.settings["name"]
-            ground_truth_slices = {}
-            for file in os.listdir(ground_truth_path):
-                index = int(re.findall(r"\d+", file)[0])
-                ground_truth_slices[index] = np.asarray(Image.open("{}/{}".format(ground_truth_path, file)))
-            self.ground_truth_slices = ground_truth_slices
-        except:
-            raise Exception("Error loading ground truth")
+    For each voxel (k, i, j), the prefix sum is defined as:
+      prefix[k, i, j] = sum_{u=0}^{k} sum_{v=0}^{i} sum_{w=0}^{j} image[u, v, w]
+
+    Similar definition applies for prefix_sq using image[u,v,w]^2.
+    """
+    D, H, W = image.shape
+    prefix = np.empty((D, H, W), dtype=image.dtype)
+    prefix_sq = np.empty((D, H, W), dtype=image.dtype)
     
-    def get_ground_truth_slices(self):
-        try:
-            self.ground_truth_slices
-        except AttributeError:
-            self.load_ground_truth()
-        for key in self.ground_truth_slices:
-                yield key, self.ground_truth_slices[key]
+    for k in range(D):
+        for i in range(H):
+            for j in range(W):
+                val = image[k, i, j]
+                sum_val = val
+                sum_sq_val = val * val
+
+                if k > 0:
+                    sum_val += prefix[k-1, i, j]
+                    sum_sq_val += prefix_sq[k-1, i, j]
+                if i > 0:
+                    sum_val += prefix[k, i-1, j]
+                    sum_sq_val += prefix_sq[k, i-1, j]
+                if j > 0:
+                    sum_val += prefix[k, i, j-1]
+                    sum_sq_val += prefix_sq[k, i, j-1]
+                if k > 0 and i > 0:
+                    sum_val -= prefix[k-1, i-1, j]
+                    sum_sq_val -= prefix_sq[k-1, i-1, j]
+                if k > 0 and j > 0:
+                    sum_val -= prefix[k-1, i, j-1]
+                    sum_sq_val -= prefix_sq[k-1, i, j-1]
+                if i > 0 and j > 0:
+                    sum_val -= prefix[k, i-1, j-1]
+                    sum_sq_val -= prefix_sq[k, i-1, j-1]
+                if k > 0 and i > 0 and j > 0:
+                    sum_val += prefix[k-1, i-1, j-1]
+                    sum_sq_val += prefix_sq[k-1, i-1, j-1]
+                
+                prefix[k, i, j] = sum_val
+                prefix_sq[k, i, j] = sum_sq_val
+    return prefix, prefix_sq
+class ImageData(ImageDataBase):
+    def __init__(self, path):
+        super().__init__( path)
     
     def get_folder(self, algorithm):
-        return "./results/binarizations/{0}/{1}".format(algorithm, self.path)
+        return self.path.replace("reconstructions", "binarizations") + "/" + algorithm
 
     def save_result(self, segmentation : np.ndarray, params : dict, algorithm : str):
         folder = self.get_folder(algorithm)
-        os.makedirs(folder, exist_ok=True)
+        makedirs(folder, exist_ok=True)
+        params["angles"] = len(self.settings["angles"]["values"])
         io.imsave("{0}/segmentation.tiff".format(folder),  segmentation)
         with open("{}/parameters.json".format(folder), "w") as f:
             f.write(json.dumps(params))
@@ -95,11 +110,12 @@ class ImageData:
         else:
             return None
     def get_e_sd(self, window : int):
-        path = self.prefix + self.path
+        path = self.path
         print("window {0}".format(window))
-        if os.path.isfile("{0}/means_{1}.npy".format(path, window)) and os.path.isfile("{0}/stds_{1}.npy".format(path, window)):
+        if os.path.isfile("{0}/means_{1}.npy".format(path, window)) and path.isfile("{0}/stds_{1}.npy".format(path, window)):
             return np.load("{0}/means_{1}.npy".format(path, window)), np.load("{0}/stds_{1}.npy".format(path, window)) 
-        means, stds = calculate_e_sd_field(self.prefix_sum, self.square_prefix_sum, window)
+        prefix_sum, square_prefix_sum = compute_prefix_sums(self.image)
+        means, stds = calculate_e_sd_field(prefix_sum, square_prefix_sum, window)
         np.save("{0}/means_{1}.npy".format(path, window), means, False)
         np.save("{0}/stds_{1}.npy".format(path, window), stds, False)
         return means, stds

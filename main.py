@@ -1,42 +1,31 @@
 import json, subprocess, sys
 from os import environ, listdir, getcwd, remove
+from pathlib import Path
 
+import config
 # Set your conda environment name here.
 CONDA_ENV = "base"
 
 dataset_paths = json.dumps(["./data/" + path for path in listdir("./data")])
-reconstructions_directory = "./results/reconstructions/"
-binarization_directory = "./results/binarizations/"
-evaluation_directory = "./results/evaluation/"
 
 with open("./experiments.json", "r") as f:
     settings = json.loads(f.read())
 
 def list_reconstruction_paths():
-    folder = reconstructions_directory
     result = []
-    for experiment in listdir(folder):
-        for dataset in listdir("{}/{}".format(folder, experiment)):
-            for angle in listdir("{}/{}/{}".format(folder, experiment, dataset)):
-                result.append("{}/{}/{}".format(experiment, dataset, angle))
+    folder = config.RECONSTRUCTION_PATH
+    for experiment in folder.glob('*'):
+        for dataset in (folder / experiment).glob('*'):
+            for angle in (folder / experiment / dataset).glob('*'):
+                result.append((folder / experiment / dataset / angle).as_posix())
     return json.dumps(result)
 
-def list_paths_for_evaluation():
-    folder = binarization_directory
+def list_results_paths(folder : Path):
     result = []
-    for algorithm in listdir(folder):
-        for experiment in listdir("{}/{}".format(folder, algorithm)):
-            for dataset in listdir("{}/{}/{}".format(folder, algorithm, experiment)):
-                result.append("{}/{}/{}".format(algorithm, experiment, dataset))
-    return json.dumps(result)
-
-def list_paths_for_visualization():
-    folder = evaluation_directory
-    result = []
-    for algorithm in listdir(folder):
-        for experiment in listdir("{}/{}".format(folder, algorithm)):
-            for dataset in listdir("{}/{}/{}".format(folder, algorithm, experiment)):
-                result.append("{}/{}/{}".format(algorithm, experiment, dataset))
+    for algorithm in folder.glob('*'):
+        for experiment in (folder / algorithm).glob('*'):
+            for dataset in (folder / algorithm / experiment).glob('*'):
+                result.append((folder / algorithm / experiment / dataset).as_posix())
     return json.dumps(result)
 
 def run_generation(dataset_paths, settings):
@@ -54,8 +43,8 @@ def run_generation(dataset_paths, settings):
 def run_binarization():
     env_for_binarization = environ.copy()
     env_for_binarization["paths"] = list_reconstruction_paths()
-    env_for_binarization["prefix"] = reconstructions_directory
-    env_for_binarization["algorithms"] = json.dumps(["niblack_3d", "otsu"])
+    env_for_binarization["prefix"] = config.RECONSTRUCTION_PATH.as_posix()
+    env_for_binarization["algorithms"] = json.dumps([ "brute", "niblack_3d", "otsu"])
     env_for_binarization["USERPROFILE"] = getcwd()
     return subprocess.run(
         ["conda", "run", "--live-stream", "-n", CONDA_ENV, "python", "-u", "./segmentation/driver.py"],
@@ -67,9 +56,9 @@ def run_binarization():
 
 def run_evaluation():
     env_for_evaluation = environ.copy()
-    env_for_evaluation["paths"] = list_paths_for_evaluation()
+    env_for_evaluation["paths"] = list_results_paths(config.SEGMENTATION_PATH)
     env_for_evaluation["USERPROFILE"] = getcwd()
-    env_for_evaluation["prefix"] = binarization_directory
+    env_for_evaluation["prefix"] = config.SEGMENTATION_PATH.as_posix()
     return subprocess.run(
         ["conda", "run", "--live-stream", "-n", CONDA_ENV, "python", "-u", "./evaluation/driver.py"],
         env=env_for_evaluation,
@@ -80,9 +69,9 @@ def run_evaluation():
 
 def run_visualization():
     env_for_visualization = environ.copy()
-    env_for_visualization["paths"] = list_paths_for_visualization()
+    env_for_visualization["paths"] = list_results_paths(config.EVALUATION_PATH)
     env_for_visualization["USERPROFILE"] = getcwd()
-    env_for_visualization["prefix"] = evaluation_directory
+    env_for_visualization["prefix"] = config.EVALUATION_PATH.as_posix()
     return subprocess.run(
         ["conda", "run", "--live-stream", "-n", CONDA_ENV, "python", "-u", "./visualization/driver.py"],
         env=env_for_visualization,
@@ -90,9 +79,16 @@ def run_visualization():
         stderr=sys.stderr,
         check=True
     )
-
+def run_experiment(env : dict, path : str):
+    return subprocess.run(
+        ["conda", "run", "--live-stream", "-n", CONDA_ENV, "python", "-u", path],
+        env=env,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        check=True
+    )
 def clean_up():
-    folder = reconstructions_directory
+    folder = config.RECONSTRUCTION_PATH.as_posix()
     search = ["cumsum.npy", "square_cumsum.npy", "mean", "std"]
     for experiment in listdir(folder):
         for dataset in listdir("{}/{}".format(folder, experiment)):
@@ -100,7 +96,6 @@ def clean_up():
                 for file in listdir("{}/{}/{}/{}".format(folder, experiment, dataset, angle)):
                     for s in search:
                         if s in file:
-                            print("{}/{}/{}/{}/{}".format(folder, experiment, dataset, angle, file))
                             remove("{}/{}/{}/{}/{}".format(folder, experiment, dataset, angle, file))
 
 if len(sys.argv) > 1:

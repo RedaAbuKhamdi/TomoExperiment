@@ -1,4 +1,5 @@
 import json
+import os
 import pandas as pd
 import numpy as np
 
@@ -11,6 +12,7 @@ prefix = environ["prefix"]
 plotData = {}
 
 for dataset_path in data_paths:
+    print(dataset_path)
     data = pd.read_csv(
         prefix + dataset_path + "/metrics.csv",
         header = 0, index_col= 0
@@ -47,4 +49,6 @@ for dataset in plotData:
     fig.set_dpi(400)
     plt.title(dataset)
     plt.legend()
+    
+    os.makedirs("./results/report/" , exist_ok=True)
     plt.savefig("./results/report/" + dataset + ".png")

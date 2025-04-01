@@ -8,7 +8,7 @@ from imagedata import ImageData
 
 def thresholding(image : np.ndarray, q  : int, mean : np.ndarray, std : np.ndarray):
     return image >= mean + std * q
-
+# visualize change of parameters and choose best
 
 def segment(imageData : ImageData, params : dict = None):
     print("Start Niblack")

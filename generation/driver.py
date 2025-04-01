@@ -75,7 +75,8 @@ class GenerationExperiment:
     def run_experiments(self):
         i = 0
         angle_generator = self.get_angle_generator()
-        for angles, step in tqdm(angle_generator()):
+        for angles, step in angle_generator():
+            print("Running angles {}".format(i))
             self.run_single_experiment(angles, i, step)
             i += 1
 

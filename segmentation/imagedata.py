@@ -5,88 +5,40 @@ import os
 import numpy as np
 
 from skimage import io
-from numba import jit
+from numba import njit, jit, prange
 from os import path, makedirs
 
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 from common.imagedata import ImageDataBase
+import cupy as cp
+import cupyx.scipy.ndimage as ndi
 
-@jit(nopython = True)
-def get_sum(prefix_sum, i, j, k, w):
-    
-    upper_left = np.array([i - w - 1, j - w - 1])
-    upper_right = np.array([i - w - 1, min(j + w, prefix_sum.shape[2] - 1)])
-    lower_left = np.array([min(i + w, prefix_sum.shape[1] - 1), j - w - 1])
-    lower_right = np.array([min(i + w, prefix_sum.shape[1] - 1), min(j + w, prefix_sum.shape[2] - 1)])
-    slices = np.array([(k - w) * (k - w >= 0), min (k + w + 1, prefix_sum.shape[0])])
-    result = 0
-    for z in range(slices[0], slices[1]):
-        lower_right_value = prefix_sum[z, lower_right[0], lower_right[1]]
-        lower_left_value = prefix_sum[z, lower_left[0], lower_left[1]] * (lower_left[1] >= 0)
-        upper_right_value = prefix_sum[z, upper_right[0], upper_right[1]] * (upper_right[0] >= 0)
-        upper_left_value = prefix_sum[z, upper_left[0], upper_left[1]] * (upper_left[0] >= 0 and upper_left[1] >= 0)
-        result +=  lower_right_value - lower_left_value - upper_right_value + upper_left_value
-    return result
-@jit(nopython = True)
-def calculate_e_sd_field(prefix_sums : np.ndarray, 
-                         prefix_sums_squared : np.ndarray,  window : int):
-    means = np.zeros(prefix_sums.shape, dtype=np.float32)
-    stds = np.zeros(prefix_sums.shape, dtype=np.float32)
-    for k in range(prefix_sums.shape[0]):
-        for i in range(prefix_sums.shape[1]):  
-            for j in range(prefix_sums.shape[2]):
-                means[k, i, j] = get_sum(prefix_sums, i, j, k, window) / window ** 3
-                stds[k, i, j] = get_sum(prefix_sums_squared, i, j, k, window) / window ** 3 - means[k, i, j] ** 2
-    return means, stds
-
-
-@jit(nopython=True, fastmath=True)
-def compute_prefix_sums(image: np.ndarray):
+def sliding_window_mean_std(arr, size, mode='reflect'):
     """
-    Compute the 3D integral image (prefix sum) and the 3D square integral image
-    for a given 3D image, with output arrays of shape (D, H, W).
-
-    For each voxel (k, i, j), the prefix sum is defined as:
-      prefix[k, i, j] = sum_{u=0}^{k} sum_{v=0}^{i} sum_{w=0}^{j} image[u, v, w]
-
-    Similar definition applies for prefix_sq using image[u,v,w]^2.
-    """
-    D, H, W = image.shape
-    prefix = np.empty((D, H, W), dtype=image.dtype)
-    prefix_sq = np.empty((D, H, W), dtype=image.dtype)
+    Compute the sliding window mean and standard deviation on GPU.
     
-    for k in range(D):
-        for i in range(H):
-            for j in range(W):
-                val = image[k, i, j]
-                sum_val = val
-                sum_sq_val = val * val
-
-                if k > 0:
-                    sum_val += prefix[k-1, i, j]
-                    sum_sq_val += prefix_sq[k-1, i, j]
-                if i > 0:
-                    sum_val += prefix[k, i-1, j]
-                    sum_sq_val += prefix_sq[k, i-1, j]
-                if j > 0:
-                    sum_val += prefix[k, i, j-1]
-                    sum_sq_val += prefix_sq[k, i, j-1]
-                if k > 0 and i > 0:
-                    sum_val -= prefix[k-1, i-1, j]
-                    sum_sq_val -= prefix_sq[k-1, i-1, j]
-                if k > 0 and j > 0:
-                    sum_val -= prefix[k-1, i, j-1]
-                    sum_sq_val -= prefix_sq[k-1, i, j-1]
-                if i > 0 and j > 0:
-                    sum_val -= prefix[k, i-1, j-1]
-                    sum_sq_val -= prefix_sq[k, i-1, j-1]
-                if k > 0 and i > 0 and j > 0:
-                    sum_val += prefix[k-1, i-1, j-1]
-                    sum_sq_val += prefix_sq[k-1, i-1, j-1]
-                
-                prefix[k, i, j] = sum_val
-                prefix_sq[k, i, j] = sum_sq_val
-    return prefix, prefix_sq
+    Parameters:
+      arr (cp.ndarray): Input array (can be 1D, 2D, etc.)
+      size (int or sequence of ints): The size of the sliding window. 
+          For multi-dimensional arrays, provide one size per axis.
+      mode (str): How to handle boundaries. Options like 'reflect', 'constant', etc.
+    
+    Returns:
+      mean (cp.ndarray): The sliding window mean.
+      std (cp.ndarray): The sliding window standard deviation.
+    """
+    # Compute the mean using a uniform filter
+    mean = ndi.uniform_filter(arr, size=size, mode=mode)
+    
+    # Compute the mean of squares using the same filter on the squared array
+    mean_sq = ndi.uniform_filter(arr**2, size=size, mode=mode)
+    
+    # Calculate the variance and then standard deviation.
+    # We use cp.maximum to avoid negative values due to numerical issues.
+    variance = mean_sq - mean**2
+    std = cp.sqrt(cp.abs(variance))
+    
+    return mean, std
 class ImageData(ImageDataBase):
     def __init__(self, path):
         super().__init__( path)
@@ -101,6 +53,11 @@ class ImageData(ImageDataBase):
         io.imsave("{0}/segmentation.tiff".format(folder),  segmentation)
         with open("{}/parameters.json".format(folder), "w") as f:
             f.write(json.dumps(params))
+    def parse_settings(self, path):
+        settings_path = path + "/" + [f for f in os.listdir(path) if f.endswith(".json")][0]
+        with open(settings_path, "r") as f:
+            self.settings = json.loads(f.read())
+            self.settings["name"] = self.path.split("/")[-2]
 
     def check_if_done(self, algorithm : str):
         folder = self.get_folder(algorithm)
@@ -112,10 +69,11 @@ class ImageData(ImageDataBase):
     def get_e_sd(self, window : int):
         path = self.path
         print("window {0}".format(window))
-        if os.path.isfile("{0}/means_{1}.npy".format(path, window)) and path.isfile("{0}/stds_{1}.npy".format(path, window)):
+        if os.path.isfile("{0}/means_{1}.npy".format(path, window)) and os.path.isfile("{0}/stds_{1}.npy".format(path, window)):
             return np.load("{0}/means_{1}.npy".format(path, window)), np.load("{0}/stds_{1}.npy".format(path, window)) 
-        prefix_sum, square_prefix_sum = compute_prefix_sums(self.image)
-        means, stds = calculate_e_sd_field(prefix_sum, square_prefix_sum, window)
+        means, stds = sliding_window_mean_std(cp.asarray(self.image), (window, window, window))
+        means = cp.asnumpy(means)
+        stds = cp.asnumpy(stds)
         np.save("{0}/means_{1}.npy".format(path, window), means, False)
         np.save("{0}/stds_{1}.npy".format(path, window), stds, False)
         return means, stds

@@ -38,11 +38,11 @@ def iterate_datasets(data_paths : list):
         strategy = dataset_path.split("/")[-3]
         name = dataset_path.split("/")[-2]
         print(dataset_path)
-        folder = "./results/evaluation/{0}/{1}".format(strategy, name)
-        if not path.isdir(folder):
-            if name not in datasets.keys():
-                datasets[name] = {}
-            for algorithm in listdir(dataset_path):
+        for algorithm in listdir(dataset_path):
+            folder = "./results/evaluation/{0}/{1}/{2}".format(strategy, name, algorithm)
+            if not path.isdir(folder):
+                if name not in datasets.keys():
+                    datasets[name] = {}
                 if algorithm not in datasets[name].keys():
                     datasets[name][algorithm] = []
                 datasets[name][algorithm].append("{}/{}".format(dataset_path, algorithm))
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     for i, name in tqdm(enumerate(datasets.keys()), "Evaluating datasets"):
         for algorithm in datasets[name].keys():
             dataset = [ImageData(datasets[name][algorithm][i]) for i in range(len(datasets[name][algorithm]))]
-            save_path = config.EVALUATION_PATH / dataset[0].strategy / name
+            save_path = config.EVALUATION_PATH / dataset[0].strategy / name / algorithm
             data_gt, angles, data_neighbor = run_evaluations(dataset, name, algorithm)
             save_result(pd.DataFrame(data_gt, index = angles), save_path, "ground_truth_metrics")
             save_result(pd.DataFrame(data_neighbor), save_path, "neighbor_metrics")

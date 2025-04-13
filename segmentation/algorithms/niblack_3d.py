@@ -23,7 +23,7 @@ def segment(imageData : ImageData, params : dict = None):
         best_image = thresholding(imageData.image, best_k, means, stds)
     else:
         shape = imageData.image.shape
-        ks, w = np.linspace(-3, 3, 60), max([1, min(min(shape)//2, 250)])
+        ks, w = np.linspace(-4, 4, 100), max([1, min(min(shape)//2, 250)])
         windows = np.arange(best_window, w, (w-best_window) // 10, dtype=np.int16)
         for window in tqdm.tqdm(windows):
             means, stds = imageData.get_e_sd(window)

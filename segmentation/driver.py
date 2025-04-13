@@ -12,6 +12,7 @@ used_algorithms = set(json.loads(environ["algorithms"]))
 parameters = {}
 for index, data_path in enumerate(reversed(data_paths)):
     data = ImageData(data_path)
+    print("Processing {0}".format(data.settings["name"]))
     if (data.settings["name"] not in parameters.keys()):
         parameters[data.settings["name"]] = {}
     for algorithm in used_algorithms.intersection(algorithms.__all__):

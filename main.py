@@ -1,6 +1,7 @@
 import json, subprocess, sys
 from os import environ, listdir, getcwd, remove
 from pathlib import Path
+from shutil  import rmtree
 
 import config
 # Set your conda environment name here.
@@ -44,7 +45,7 @@ def run_binarization():
     env_for_binarization = environ.copy()
     env_for_binarization["paths"] = list_reconstruction_paths()
     env_for_binarization["prefix"] = config.RECONSTRUCTION_PATH.as_posix()
-    env_for_binarization["algorithms"] = json.dumps([ "brute", "niblack_3d", "otsu"])
+    env_for_binarization["algorithms"] = json.dumps(["niblack_3d"])
     env_for_binarization["USERPROFILE"] = getcwd()
     return subprocess.run(
         ["conda", "run", "--live-stream", "-n", CONDA_ENV, "python", "-u", "./segmentation/driver.py"],
@@ -69,9 +70,7 @@ def run_evaluation():
 
 def run_visualization():
     env_for_visualization = environ.copy()
-    env_for_visualization["paths"] = list_results_paths(config.EVALUATION_PATH)
     env_for_visualization["USERPROFILE"] = getcwd()
-    env_for_visualization["prefix"] = config.EVALUATION_PATH.as_posix()
     return subprocess.run(
         ["conda", "run", "--live-stream", "-n", CONDA_ENV, "python", "-u", "./visualization/driver.py"],
         env=env_for_visualization,
@@ -89,7 +88,7 @@ def run_experiment(env : dict, path : str):
     )
 def clean_up():
     folder = config.RECONSTRUCTION_PATH.as_posix()
-    search = ["cumsum.npy", "square_cumsum.npy", "mean", "std"]
+    search = ["mean", "std"]
     for experiment in listdir(folder):
         for dataset in listdir("{}/{}".format(folder, experiment)):
             for angle in listdir("{}/{}/{}".format(folder, experiment, dataset)):
@@ -97,6 +96,13 @@ def clean_up():
                     for s in search:
                         if s in file:
                             remove("{}/{}/{}/{}/{}".format(folder, experiment, dataset, angle, file))
+def delete_algorithm(algorithm):
+    for experiment in config.SEGMENTATION_PATH.iterdir():
+        for dataset in experiment.iterdir():
+            for angle in dataset.iterdir():
+                for algo in angle.iterdir():
+                    if algorithm in str(algo.as_posix()):
+                        rmtree(algo)
 
 if len(sys.argv) > 1:
     for i in range(len(settings)):
@@ -110,4 +116,7 @@ if len(sys.argv) > 1:
         if "4" in sys.argv[1]:
             run_visualization()
         if "clean" in sys.argv[1]:
-            clean_up()
+            if len(sys.argv) > 2:
+                delete_algorithm(sys.argv[2])
+            else:
+                clean_up()

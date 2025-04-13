@@ -1,48 +1,201 @@
 import numpy as np
 from numba import njit, prange
+from tqdm import tqdm
 
-@njit()
-def get_window(image, i, j, k, w):
-    # Compute window bounds without extra array allocations
-    i0 = i - w if i - w >= 0 else 0
-    i1 = i + w if i + w < image.shape[0] else image.shape[0]
-    j0 = j - w if j - w >= 0 else 0
-    j1 = j + w if j + w < image.shape[1] else image.shape[1]
-    k0 = k - w if k - w >= 0 else 0
-    k1 = k + w if k + w < image.shape[2] else image.shape[2]
-    return image[i0:i1, j0:j1, k0:k1]
+import cupy as cp
 
-@njit(fastmath=True)
-def handle_window(segmentation, ground_truth, index, window):
-    seg = get_window(segmentation, index[0], index[1], index[2], window)
-    gt  = get_window(ground_truth, index[0], index[1], index[2], window)
-    seg_and_gt = seg & gt
-    intersection = np.sum(seg_and_gt)
-    union = np.sum(seg) + np.sum(gt)
-    # Instead of computing np.prod(seg_and_gt), we check if not all elements are 1
-    if (intersection != seg_and_gt.size and union > 0):
-        return 2 * intersection / union
-    else:
-        return 0.0
+# Define a custom CUDA kernel for a 3D sliding window sum with zero-padding.
+kernel_code = r'''
+extern "C" __global__
+void sliding_window_sum_3d(const int* arr, int* out, 
+                           int D0, int D1, int D2, 
+                           int radius)
+{
+    // Compute the 3D index handled by this thread.
+    // We use z for the first dimension (i), y for the second (j), and x for the third (k)
+    int k = blockIdx.x * blockDim.x + threadIdx.x;  // third dimension index
+    int j = blockIdx.y * blockDim.y + threadIdx.y;  // second dimension index
+    int i = blockIdx.z * blockDim.z + threadIdx.z;  // first dimension index
 
-@njit(parallel=True, fastmath=True)
+    if (i >= D0 || j >= D1 || k >= D2)
+        return;
+
+    float sum = 0.0f;
+    // Loop over the window in the first dimension.
+    for (int di = -radius; di <= radius; di++) {
+        int ii = i + di;
+        if (ii < 0 || ii >= D0)
+            continue;
+        // Loop over the window in the second dimension.
+        for (int dj = -radius; dj <= radius; dj++) {
+            int jj = j + dj;
+            if (jj < 0 || jj >= D1)
+                continue;
+            // Loop over the window in the third dimension.
+            for (int dk = -radius; dk <= radius; dk++) {
+                int kk = k + dk;
+                if (kk < 0 || kk >= D2)
+                    continue;
+                // Compute the flat index for the 3D array.
+                int idx = ii * D1 * D2 + jj * D2 + kk;
+                sum += arr[idx];
+            }
+        }
+    }
+    // Write the result to the output.
+    out[i * D1 * D2 + j * D2 + k] = sum;
+}
+'''
+
+# Compile the custom CUDA kernel.
+sliding_window_sum_kernel = cp.RawKernel(kernel_code, 'sliding_window_sum_3d')
+
+def sliding_window_sum_3d_gpu(arr, radius):
+    """
+    Compute a 3D sliding window sum on a GPU using a custom CUDA kernel with zero-padding.
+    
+    Each output voxel (i, j, k) is computed as the sum of all values in the window
+    from (i - radius, j - radius, k - radius) to (i + radius, j + radius, k + radius).
+    Voxels outside the boundaries are treated as zero.
+    
+    Parameters:
+      arr (cp.ndarray): 3D input array on the GPU (dtype float32).
+      radius (int): Radius of the window.
+    
+    Returns:
+      cp.ndarray: A 3D output array with the same shape as `arr`, containing the sliding window sum.
+    """
+    if arr.ndim != 3:
+        raise ValueError("This function supports 3D arrays only.")
+    if arr.dtype != cp.int32:
+        arr = arr.astype(cp.int32)
+    
+    D0, D1, D2 = arr.shape
+    out = cp.empty_like(arr)
+    
+    # Define block size. A good starting point is (8, 8, 8).
+    threads_per_block = (8, 8, 8)
+    # Grid dimensions are computed based on the volume dimensions.
+    blocks_x = (D2 + threads_per_block[0] - 1) // threads_per_block[0]
+    blocks_y = (D1 + threads_per_block[1] - 1) // threads_per_block[1]
+    blocks_z = (D0 + threads_per_block[2] - 1) // threads_per_block[2]
+    grid = (blocks_x, blocks_y, blocks_z)
+    
+    # Launch the kernel.
+    sliding_window_sum_kernel(grid, threads_per_block,
+                              (arr, out, D0, D1, D2, radius))
+    return out
+
+# Define a custom CUDA kernel that checks if any element in the 3D neighborhood is zero.
+kernel_code = r'''
+extern "C" __global__
+void sliding_window_has_zero(const int* arr, int* out,
+                             int D0, int D1, int D2, int radius)
+{
+    // Compute the 3D index for the current thread.
+    // Here: i = first dimension, j = second, k = third.
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int i = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if (i >= D0 || j >= D1 || k >= D2)
+        return;
+
+    bool found = false;
+
+    // Loop over the neighborhood: from i - radius to i + radius, etc.
+    for (int di = -radius; di <= radius && !found; di++) {
+        int ii = i + di;
+        if (ii < 0 || ii >= D0)
+            continue;
+        for (int dj = -radius; dj <= radius && !found; dj++) {
+            int jj = j + dj;
+            if (jj < 0 || jj >= D1)
+                continue;
+            for (int dk = -radius; dk <= radius; dk++) {
+                int kk = k + dk;
+                if (kk < 0 || kk >= D2)
+                    continue;
+
+                int idx = ii * D1 * D2 + jj * D2 + kk;
+                if (arr[idx] == 0.0f) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Write 1 if a zero was found, 0 otherwise.
+    out[i * D1 * D2 + j * D2 + k] = found ? 1.0f : 0.0f;
+}
+'''
+
+# Compile the CUDA kernel.
+sliding_window_has_zero_kernel = cp.RawKernel(kernel_code, 'sliding_window_has_zero')
+
+def sliding_window_has_zero_3d_gpu(arr, radius):
+    """
+    Check with a sliding window whether there is any zero in the neighborhood for a 3D array.
+    
+    For each voxel (i, j, k) in the input 3D array, the function examines
+    the values in the window spanning from (i - radius) to (i + radius),
+    (j - radius) to (j + radius), and (k - radius) to (k + radius). If any element in the window is zero,
+    the output voxel is set to 1; otherwise, it is set to 0.
+    
+    Out-of-bound indices (where the window extends past the array boundary)
+    are skipped.
+    
+    Parameters:
+      arr (cp.ndarray): A 3D CuPy array with dtype float32.
+      radius (int): The radius defining the window size.
+    
+    Returns:
+      cp.ndarray: A 3D CuPy array of the same shape as `arr` containing 1's and 0's.
+    """
+    if arr.ndim != 3:
+        raise ValueError("This function supports 3D arrays only.")
+    if arr.dtype != cp.int32:
+        arr = arr.astype(cp.int32)
+        
+    D0, D1, D2 = arr.shape
+    out = cp.empty_like(arr)
+    
+    # Define a 3D block size. Here (8, 8, 8) is chosen as a starting point.
+    threads_per_block = (8, 8, 8)
+    blocks_x = (D2 + threads_per_block[0] - 1) // threads_per_block[0]
+    blocks_y = (D1 + threads_per_block[1] - 1) // threads_per_block[1]
+    blocks_z = (D0 + threads_per_block[2] - 1) // threads_per_block[2]
+    grid = (blocks_x, blocks_y, blocks_z)
+    
+    # Launch the kernel.
+    sliding_window_has_zero_kernel(grid, threads_per_block,
+                                   (arr, out, D0, D1, D2, radius))
+    return out
+
 def evaluate(segmentation, ground_truth):
     radius = 5
-    # Use bitwise OR to combine the arrays
-    combined = segmentation | ground_truth
-    indices = np.argwhere(combined)
-    
-    # Compute scores for each index in parallel.
-    results = np.zeros(indices.shape[0])
-    for idx in prange(indices.shape[0]):
-        results[idx] = handle_window(segmentation, ground_truth, indices[idx], radius)
-    
-    # Aggregate results in a serial pass
-    total_score = 0.0
-    count = 0
-    for r in results:
-        if r > 0:
-            total_score += r
-            count += 1
-    
-    return total_score / count if count > 0 else 0.0
+    ground_truth[ground_truth > 0] = 1
+    segmentation[segmentation > 0] = 1
+    cp_seg = cp.asarray(segmentation, dtype=cp.int32)
+    cp_gt = cp.asarray(ground_truth, dtype=cp.int32)
+    has_0_seg = sliding_window_has_zero_3d_gpu(cp_seg, radius)
+    has_0_gt = sliding_window_has_zero_3d_gpu(cp_gt, radius)
+    boundary_seg = cp.argwhere(cp.logical_and(cp_seg, has_0_seg))
+    boundary_gt = cp.argwhere(cp.logical_and(cp_gt, has_0_gt))
+    intersections = sliding_window_sum_3d_gpu(cp.logical_and(cp_seg, cp_gt), radius)
+    seg_sum = sliding_window_sum_3d_gpu(cp_seg, radius)
+    gt_sum = sliding_window_sum_3d_gpu(cp_gt, radius)
+    print("Boundary dice")
+    result = 0
+    for indices in [boundary_seg, boundary_gt]:
+        idx0 = indices[:, 0]
+        idx1 = indices[:, 1]
+        idx2 = indices[:, 2]
+        numerator = 2 * intersections[idx0, idx1, idx2]
+        denominator = seg_sum[idx0, idx1, idx2] + gt_sum[idx0, idx1, idx2]
+        temp = numerator / denominator
+        result += cp.sum(temp)
+       
+
+    return float(result / (boundary_gt.shape[0] + boundary_seg.shape[0]))

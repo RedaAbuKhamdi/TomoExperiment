@@ -8,6 +8,8 @@ import numpy as np
 from os import environ, listdir, makedirs, path
 from matplotlib import pyplot as plt
 
+from metricsdata import MetricsData
+
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 import config
 def iterate_datasets():
@@ -31,23 +33,49 @@ def iterate_datasets():
                     })
                 yield dataset_config
 
-def process_dataset(dataset_config):
-    base_path = config.VISUALIZATION_PATH / dataset_config["experiment"] / dataset_config["name"]
-    for evaluation in dataset_config["evaluations"]:
-        evaluation_data = pd.read_csv(evaluation["path"], header = 0, index_col= 0)
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        for metric in evaluation_data:
-            series = evaluation_data[metric]
-            ax.scatter(series.index.to_numpy(), series.to_numpy(), label = metric)
-        ax.set_title(evaluation["type"])
-        ax.legend()
-        makedirs(base_path, exist_ok=True)
-        fig.savefig(base_path / "{} {}.png".format(evaluation["type"], dataset_config["algorithm"]))
-        plt.close()
+def bar_charts(algorithm_data: dict, algorithm : str, delta : bool = False):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    datasets = algorithm_data["datasets"]
+    angles = algorithm_data["angles"]
+    metric_values = algorithm_data["metric_values"]
+
+    x = np.arange(len(angles))  
+    num_bars_per_group = len(datasets) * len(next(iter(metric_values.values())).keys())
+    bar_width = 0.8 / num_bars_per_group 
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for i, dataset in enumerate(datasets):
+        for j, metric in enumerate(metric_values[dataset].keys()):
+            values = metric_values[dataset][metric]
+            if delta:
+                values = np.gradient(values, angles)
+            index_in_group = i * len(metric_values[dataset]) + j
+            offset = (index_in_group - num_bars_per_group / 2) * bar_width + bar_width / 2
+            ax.bar(x + offset, values, bar_width, label=f"{dataset} - {metric}")
+
+    ax.set_xlabel("Number of Angles")
+    ax.set_ylabel("Metric Value")
+    ax.set_title("Metrics per Dataset and Angle")
+    ax.set_xticks(x)
+    ax.set_xticklabels(angles)
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    plt.show()
+    
+    folder = config.VISUALIZATION_PATH / algorithm
+    makedirs(folder, exist_ok=True)
+    fig.savefig("{0}/{1}bar_chart.png".format(folder, "delta_" if delta else ""))
 
 
 if __name__ == "__main__":
     print("Start visualization")
-    for dataset_config in iterate_datasets():
-        process_dataset(dataset_config)
+    metrics_data = MetricsData()
+    for algorithm, data in metrics_data.get_per_algorithm_data("Neighbor metrics"):
+        print("Processing algorithm {}".format(algorithm))
+        bar_charts(data, algorithm, delta=True)
+        bar_charts(data, algorithm, delta=False)
+        
+            

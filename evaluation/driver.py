@@ -72,4 +72,4 @@ if __name__ == "__main__":
             save_path = config.EVALUATION_PATH / dataset[0].strategy / name / algorithm
             data_gt, angles, data_neighbor = run_evaluations(dataset, name, algorithm)
             save_result(pd.DataFrame(data_gt, index = angles), save_path, "ground_truth_metrics")
-            save_result(pd.DataFrame(data_neighbor), save_path, "neighbor_metrics")
+            save_result(pd.DataFrame(data_neighbor, index = angles), save_path, "neighbor_metrics")

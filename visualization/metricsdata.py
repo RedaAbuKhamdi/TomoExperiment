@@ -59,6 +59,7 @@ class MetricsData:
                         })
                     self.data.append(dataset_config)
         self.algorithms = None
+        self.datasets = None
         
     def get_algorithms(self):
         if self.algorithms is None:
@@ -67,6 +68,14 @@ class MetricsData:
                 if dataset_config["algorithm"] not in self.algorithms:
                     self.algorithms.append(dataset_config["algorithm"])
         return self.algorithms
+
+    def get_datasets(self):
+        if self.datasets is None:
+            self.datasets = []
+            for dataset_config in self.data:
+                if dataset_config["name"] not in self.datasets:
+                    self.datasets.append(dataset_config["name"])
+        return self.datasets
     
     def get_per_algorithm_data(self, evaluation_type : str):
         for algorithm in self.get_algorithms():

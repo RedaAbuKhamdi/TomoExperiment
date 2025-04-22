@@ -10,6 +10,14 @@ from matplotlib import pyplot as plt
 
 from metricsdata import MetricsData
 
+from matplotlib import colors as mcolors
+import random
+
+def generate_distinct_colors(labels):
+    color_names = list(mcolors.TABLEAU_COLORS.values())
+    random.shuffle(color_names)
+    return dict(zip(labels, color_names[:len(labels)]))
+
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 import config
 def iterate_datasets():
@@ -34,9 +42,6 @@ def iterate_datasets():
                 yield dataset_config
 
 def bar_charts(algorithm_data: dict, algorithm : str, delta : bool = False):
-    import numpy as np
-    import matplotlib.pyplot as plt
-
     datasets = algorithm_data["datasets"]
     angles = algorithm_data["angles"]
     metric_values = algorithm_data["metric_values"]
@@ -63,19 +68,50 @@ def bar_charts(algorithm_data: dict, algorithm : str, delta : bool = False):
     ax.set_xticklabels(angles)
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    plt.show()
     
     folder = config.VISUALIZATION_PATH / algorithm
     makedirs(folder, exist_ok=True)
     fig.savefig("{0}/{1}bar_chart.png".format(folder, "delta_" if delta else ""))
 
+def scatter_plots(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
+    datasets = algorithm_data["datasets"]
+    angles = algorithm_data["angles"]
+    metric_values = algorithm_data["metric_values"]
+    metrics = metric_values[datasets[0]].keys()
+
+    x = np.arange(len(angles))  
+    for metric_name in metrics:
+        plt.clf()
+        for i, dataset in enumerate(datasets):
+            for j, metric in enumerate(metric_values[dataset].keys()):
+                if metric != metric_name:
+                    continue
+                values = metric_values[dataset][metric]
+                if delta:
+                    values = np.gradient(values, angles)
+                plt.scatter(angles.astype(str), values, color=colors[dataset], label=f"{dataset} - {metric}")
+
+        plt.title("Bubble Chart of Metric Values by Angle and Dataset")
+        plt.xlabel("Number of Angles")
+        plt.ylabel("Metric Value")
+        plt.tight_layout()
+        
+        folder = config.VISUALIZATION_PATH / algorithm
+        makedirs(folder, exist_ok=True)
+        plt.savefig("{0}/{1}scatter_plot{2}.png".format(folder, metric_name ,"_delta" if delta else ""))
+
 
 if __name__ == "__main__":
     print("Start visualization")
     metrics_data = MetricsData()
+    datasets = metrics_data.get_datasets()
+    colors = generate_distinct_colors(datasets)
     for algorithm, data in metrics_data.get_per_algorithm_data("Neighbor metrics"):
         print("Processing algorithm {}".format(algorithm))
+        print(data)
         bar_charts(data, algorithm, delta=True)
+        scatter_plots(data, algorithm, colors, delta=True)
         bar_charts(data, algorithm, delta=False)
+        scatter_plots(data, algorithm, colors, delta=False)
         
             

@@ -5,10 +5,12 @@ import os
 import json
 from numba import jit, prange
 from ellipses import SyntheticEllipsesImage
+from polygon import PolygonSceneGenerator
+from grid import Grid3DGenerator
 
 
-def save_dataset(image):
-    folder = "../data/ellipses"
+def save_dataset(image, dataset_name):
+    folder = "../data/" + dataset_name
     os.makedirs(folder, exist_ok=True)
 
     for k in range(image.shape[0]):
@@ -17,7 +19,7 @@ def save_dataset(image):
 
     with open(folder + "/settings.json", "w") as f:
         f.write(json.dumps({
-        "name": "ellipses",
+        "name": dataset_name,
         "detector_spacing": {
             "x": 1,
             "y": 1
@@ -30,15 +32,20 @@ def save_dataset(image):
         "algorithm": "SIRT3D_CUDA"
     }))
     
-def save_ground_truth(image):
-    folder = "../ground_truth/ellipses"
+def save_ground_truth(image, dataset_name):
+    folder = "../ground_truth/" + dataset_name
     os.makedirs(folder, exist_ok=True)
     for k in range(image.shape[0]):
         slice = PIL.Image.fromarray(np.uint8((image[k] > 0) * (255)) , 'L')
         slice.save(folder + "/" + str(k) + ".png")
 
+dataset_name = input("Which dataset to generate (ellipses, polygons, grid)")
+if (dataset_name == "polygons"):
+    image = PolygonSceneGenerator().generate_dataset(np.zeros((256, 512, 512)), 3) * 124
+elif dataset_name == "ellipses":
+    image = SyntheticEllipsesImage().generate_dataset(np.zeros((256, 512, 512)), 3)
+else:
+    image = Grid3DGenerator.generate_dataset(64, 5, False) * 104
 
-image = SyntheticEllipsesImage().generate_dataset(np.zeros((256, 512, 512)), 3)
-
-save_ground_truth(image)
-save_dataset(image)
+save_ground_truth(image, dataset_name)
+save_dataset(image, dataset_name)

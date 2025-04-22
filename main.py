@@ -45,7 +45,7 @@ def run_binarization():
     env_for_binarization = environ.copy()
     env_for_binarization["paths"] = list_reconstruction_paths()
     env_for_binarization["prefix"] = config.RECONSTRUCTION_PATH.as_posix()
-    env_for_binarization["algorithms"] = json.dumps(["niblack_3d"])
+    env_for_binarization["algorithms"] = json.dumps(["niblack_3d", "otsu", "brute"])
     env_for_binarization["USERPROFILE"] = getcwd()
     return subprocess.run(
         ["conda", "run", "--live-stream", "-n", CONDA_ENV, "python", "-u", "./segmentation/driver.py"],

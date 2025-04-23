@@ -1,7 +1,5 @@
 /results/
 .matplotlib/
-/data/
-/ground_truth/
 **/*.pyc*
 /segmentation/algorithms/__pycache__/
 /__pycache__/

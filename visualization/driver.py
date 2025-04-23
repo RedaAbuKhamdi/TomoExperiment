@@ -41,37 +41,55 @@ def iterate_datasets():
                     })
                 yield dataset_config
 
-def bar_charts(algorithm_data: dict, algorithm : str, delta : bool = False):
-    datasets = algorithm_data["datasets"]
-    angles = algorithm_data["angles"]
-    metric_values = algorithm_data["metric_values"]
+def bar_charts(algorithm_data: dict, algorithm: str, delta: bool = False):
+    datasets       = algorithm_data["datasets"]
+    angles         = algorithm_data["angles"]
+    metric_values  = algorithm_data["metric_values"]
+    metrics        = list(next(iter(metric_values.values())).keys())
 
-    x = np.arange(len(angles))  
-    num_bars_per_group = len(datasets) * len(next(iter(metric_values.values())).keys())
-    bar_width = 0.8 / num_bars_per_group 
+    N = len(datasets)
+    M = len(metrics)
+    x = np.arange(len(angles))
+    bar_width = 0.8 / M
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # create one row per dataset
+    fig, axes = plt.subplots(
+        nrows=N, ncols=1,
+        figsize=(12, 4 * N),
+        sharex=True
+    )
 
-    for i, dataset in enumerate(datasets):
-        for j, metric in enumerate(metric_values[dataset].keys()):
-            values = metric_values[dataset][metric]
+    # if there's only one dataset, axes is not a list
+    if N == 1:
+        axes = [axes]
+
+    for ax, dataset in zip(axes, datasets):
+        for j, metric_name in enumerate(metrics):
+            vals = np.array(metric_values[dataset][metric_name], dtype=float)
             if delta:
-                values = np.gradient(values, angles)
-            index_in_group = i * len(metric_values[dataset]) + j
-            offset = (index_in_group - num_bars_per_group / 2) * bar_width + bar_width / 2
-            ax.bar(x + offset, values, bar_width, label=f"{dataset} - {metric}")
+                vals = np.gradient(vals, angles)
+            # center the group of M bars at x=k
+            offset = (j - (M - 1) / 2) * bar_width
+            ax.bar(x + offset, vals, bar_width, label=metric_name)
 
-    ax.set_xlabel("Number of Angles")
-    ax.set_ylabel("Metric Value")
-    ax.set_title("Metrics per Dataset and Angle")
-    ax.set_xticks(x)
-    ax.set_xticklabels(angles)
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.tight_layout()
-    
+        ax.set_ylabel("Metric Value")
+        ax.set_title(f"{dataset}")
+        ax.legend(loc="upper right")
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+    # common labels
+    axes[-1].set_xlabel("Number of Angles")
+    axes[-1].set_xticks(x)
+    axes[-1].set_xticklabels(angles)
+    fig.suptitle(f"{algorithm} — {'Δ ' if delta else ''}Metrics per Dataset", fontsize=16)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    # save
     folder = config.VISUALIZATION_PATH / algorithm
     makedirs(folder, exist_ok=True)
-    fig.savefig("{0}/{1}bar_chart.png".format(folder, "delta_" if delta else ""))
+    filename = f"{'delta_' if delta else ''}bar_charts.png"
+    fig.savefig(f"{folder}/{filename}")
+    plt.close(fig)
 
 def scatter_plots(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
     datasets = algorithm_data["datasets"]
@@ -95,7 +113,7 @@ def scatter_plots(algorithm_data: dict, algorithm : str, colors : list, delta : 
         plt.xlabel("Number of Angles")
         plt.ylabel("Metric Value")
         plt.tight_layout()
-        
+        plt.legend()
         folder = config.VISUALIZATION_PATH / algorithm
         makedirs(folder, exist_ok=True)
         plt.savefig("{0}/{1}scatter_plot{2}.png".format(folder, metric_name ,"_delta" if delta else ""))

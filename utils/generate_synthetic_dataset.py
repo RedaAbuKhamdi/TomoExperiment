@@ -44,6 +44,8 @@ if (dataset_name == "polygons"):
     image = PolygonSceneGenerator().generate_dataset(np.zeros((256, 512, 512)), 3) * 124
 elif dataset_name == "ellipses":
     image = SyntheticEllipsesImage().generate_dataset(np.zeros((256, 512, 512)), 3)
+elif dataset_name == "anglegrid":
+    image = Grid3DGenerator.generate_dataset(64, 5, True) * 104
 else:
     image = Grid3DGenerator.generate_dataset(64, 5, False) * 104
 

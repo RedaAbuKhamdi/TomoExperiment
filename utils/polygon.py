@@ -1,6 +1,7 @@
 import numpy as np
 import cupy as cp
 from typing import Tuple
+from skimage.draw import polygon
 import scipy.ndimage as ndi
 
 # ─── Utility Functions ─────────────────────────────────────────────────────────
@@ -110,34 +111,76 @@ def place_pyramid(volume: np.ndarray,
 # ─── Hexagon Placement in Free Space ───────────────────────────────────────────
 
 def place_hexagon_in_free(volume: np.ndarray,
-                           size_range: Tuple[int, int] = (5, 15),
-                           height_range: Tuple[int, int] = (5, 15)):
+                          size_range:   Tuple[int, int] = (80, 130),
+                          height_range: Tuple[int, int] = (80, 130),
+                          padding:      int            = 0):
     """
-    Find the largest empty pocket via distance transform, carve it out,
-    and place one hexagonal prism there for guaranteed visibility.
+    Carve the largest empty pocket, then place a fully-visible, randomly-rotated
+    vertical hexagonal prism there, with extra `padding` added to its radius.
     """
+    # 1) Largest empty pocket center & radius
     free = (volume == 0).astype(np.uint8)
     dist = ndi.distance_transform_edt(free)
-    idx = np.unravel_index(np.argmax(dist), dist.shape)
-    zc, yc, xc = idx
-    max_r = dist[idx]
+    zc_o, yc_o, xc_o = np.unravel_index(np.argmax(dist), dist.shape)
+    max_r = dist[zc_o, yc_o, xc_o]
     if max_r < size_range[0]:
+        print("Hexagon placement failed (pocket too small)")
         return
-    size = min(np.random.randint(size_range[0], size_range[1] + 1), int(max_r))
-    height = min(np.random.randint(height_range[0], height_range[1] + 1), int(max_r))
+
+    # 2) choose size & height (clamped by pocket)
+    size   = min(np.random.randint(*size_range),   int(max_r))
+    height = min(np.random.randint(*height_range), int(max_r))
+    size_eff = size + padding
+
     D, H, W = volume.shape
-    y0, y1 = max(0, int(yc - size)), min(H - 1, int(yc + size))
-    x0, x1 = max(0, int(xc - size)), min(W - 1, int(xc + size))
-    z0, z1 = zc, min(D - 1, zc + height)
-    volume[z0:z1 + 1, y0:y1 + 1, x0:x1 + 1] = 0
-    angles = np.linspace(0, 2 * np.pi, 6, endpoint=False)
-    verts = np.vstack([xc + size * np.cos(angles), yc + size * np.sin(angles)]).T
-    for z in range(z0, z1 + 1):
-        for y in range(y0, y1 + 1):
-            for x in range(x0, x1 + 1):
-                if (x - xc) ** 2 + (y - yc) ** 2 <= size ** 2:
-                    if point_in_polygon(x + 0.5, y + 0.5, verts):
-                        volume[z, y, x] = 1
+    # 3) clamp the center so shape fits entirely in [0..W-1]×[0..H-1]×[0..D-1]
+    xc = int(np.clip(xc_o, size_eff,      W - 1 - size_eff))
+    yc = int(np.clip(yc_o, size_eff,      H - 1 - size_eff))
+    zc = int(np.clip(zc_o, 0,             D - 1 - height))
+
+    # 4) Build & rotate hexagon vertices in XY-plane
+    angles = np.linspace(0, 2*np.pi, 6, endpoint=False)
+    verts = np.column_stack([
+        xc + size_eff * np.cos(angles),
+        yc + size_eff * np.sin(angles)
+    ])  # (6,2)
+
+    theta = np.random.uniform(0, 2*np.pi)
+    c, s = np.cos(theta), np.sin(theta)
+    R2 = np.array([[ c, -s],[ s,  c]])
+    centered = verts - np.array([xc, yc])
+    verts_rot = (centered @ R2.T) + np.array([xc, yc])
+
+    # 5) full (unclamped) 2D bounding box of rotated hexagon
+    x_min = int(np.floor (verts_rot[:,0].min()))
+    x_max = int(np.ceil  (verts_rot[:,0].max()))
+    y_min = int(np.floor (verts_rot[:,1].min()))
+    y_max = int(np.ceil  (verts_rot[:,1].max()))
+    mask_w = x_max - x_min + 1
+    mask_h = y_max - y_min + 1
+
+    # 6) rasterize full hexagon into 2D mask
+    local = verts_rot - np.array([x_min, y_min])
+    rr, cc = polygon(local[:,1], local[:,0],
+                     shape=(mask_h, mask_w))
+    mask2d = np.zeros((mask_h, mask_w), dtype=bool)
+    mask2d[rr, cc] = True
+
+    # 7) extrude along Z
+    z0, z1 = zc, zc + height
+    depth = z1 - z0 + 1
+    mask3d = np.broadcast_to(mask2d, (depth, mask_h, mask_w))
+
+    # 8) clamp that bbox to volume bounds
+    x0 = max(0, x_min); x1 = min(W - 1, x_max)
+    y0 = max(0, y_min); y1 = min(H - 1, y_max)
+    sx = x0 - x_min; sy = y0 - y_min
+    ex = sx + (x1 - x0); ey = sy + (y1 - y0)
+
+    # 9) carve out & fill only the overlap
+    volume[z0:z1+1, y0:y1+1, x0:x1+1] = 0
+    submask = mask3d[:, sy:ey+1, sx:ex+1]
+    volume[z0:z1+1, y0:y1+1, x0:x1+1][submask] = 1
 
 # ─── Canonical Pyramids ────────────────────────────────────────────────────────
 
@@ -155,12 +198,15 @@ class PolygonSceneGenerator:
                          volume: np.ndarray,
                          cluster_radius: float = 30.0
                          ) -> np.ndarray:
-        scales = ((180, 260), (180, 260))
+        scales = ((170, 250), (170, 250))
         D, H, W = volume.shape
         center = np.array([W/2, H/2, D/2], float)
         place_pyramid(volume, unit_rect_apex, unit_rect_base,
                       scales[0], center, cluster_radius)
+        print("Pyramid 1 placed")
         place_pyramid(volume, unit_tri_apex, unit_tri_base,
                       scales[1], center, cluster_radius)
+        print("Pyramid 2 placed")
         place_hexagon_in_free(volume)
+        print("Hexagon placed")
         return volume

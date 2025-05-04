@@ -7,6 +7,7 @@ from numba import jit, prange
 from ellipses import SyntheticEllipsesImage
 from polygon import PolygonSceneGenerator
 from grid import Grid3DGenerator
+from gaussian import SyntheticGaussianImage
 
 
 def save_dataset(image, dataset_name):
@@ -40,14 +41,18 @@ def save_ground_truth(image, dataset_name):
         slice.save(folder + "/" + str(k) + ".png")
 
 dataset_name = input("Which dataset to generate (ellipses, polygons, grid)")
-if (dataset_name == "polygons"):
-    image = PolygonSceneGenerator().generate_dataset(np.zeros((256, 512, 512)), 3) * 124
+if ("polygons" in dataset_name):
+    image = PolygonSceneGenerator().generate_dataset(np.zeros((256, 512, 512)), float(input("Cluster radius: "))) * 124
 elif dataset_name == "ellipses":
     image = SyntheticEllipsesImage().generate_dataset(np.zeros((256, 512, 512)), 3)
 elif dataset_name == "anglegrid":
     image = Grid3DGenerator.generate_dataset(64, 5, True) * 104
-else:
+elif dataset_name == "grid":
     image = Grid3DGenerator.generate_dataset(64, 5, False) * 104
+elif dataset_name == "gaussian":
+    image = SyntheticGaussianImage().generate_dataset(np.zeros((256, 512, 512))) * 104
+else:
+    raise Exception("Unknown dataset name")
 
 save_ground_truth(image, dataset_name)
 save_dataset(image, dataset_name)

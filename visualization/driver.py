@@ -45,30 +45,30 @@ def delta_from_values(values : np.ndarray) -> np.ndarray:
     for i in range(result.shape[0] - 1):
         result[i] = values[i+1] - values[i]
     return result
-def scatter_plots(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
+def scatter_plots(algorithm_data: dict, algorithm : str, colors : list):
     datasets = algorithm_data["datasets"]
     angles = algorithm_data["angles"]
     metric_values = algorithm_data["metric_values"]
     metrics = metric_values[datasets[0]].keys()
 
-    x = np.arange(len(angles))  
     for metric_name in metrics:
         plt.clf()
         for i, dataset in enumerate(datasets):
             for j, metric in enumerate(metric_values[dataset].keys()):
                 if metric != metric_name:
                     continue
-                values = delta_from_values(metric_values[dataset][metric_name]) if delta else metric_values[dataset][metric_name]
-                plt.scatter(angles.astype(str), values, color=colors[dataset], label=f"{dataset} - {metric}")
+                values = metric_values[dataset][metric_name]
+                plt.scatter(angles.astype(str), values, color=colors[dataset], label=f"{dataset} - {metric}", s = 16)
 
-        plt.title("Bubble Chart of Metric Values by Angle and Dataset")
+        plt.title("{} metric values by angle for each image".format(metric_name))
         plt.xlabel("Number of Angles")
         plt.ylabel("Metric Value")
+        plt.ylim(0, 1)
         plt.tight_layout()
         plt.legend()
         folder = config.VISUALIZATION_PATH / algorithm
         makedirs(folder, exist_ok=True)
-        plt.savefig("{0}/{1}_scatter_plot{2}.png".format(folder, metric_name ,"_delta" if delta else ""))
+        plt.savefig("{0}/{1}_scatter_plot_neighbor.png".format(folder, metric_name))
 
 def scatter_plots_per_dataset(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
     datasets = algorithm_data["datasets"]
@@ -83,14 +83,14 @@ def scatter_plots_per_dataset(algorithm_data: dict, algorithm : str, colors : li
             values = delta_from_values(metric_values[dataset][metric]) if delta else metric_values[dataset][metric]
             plt.scatter(angles.astype(str), values, label=f"{dataset} - {metric}")
 
-        plt.title("Bubble Chart of Metric Values by Angle and Dataset")
+        plt.title("Metric values by angle for image {}".format(dataset))
         plt.xlabel("Number of Angles")
         plt.ylabel("Metric Value")
         plt.tight_layout()
         plt.legend()
-        folder = config.VISUALIZATION_PATH / algorithm
+        folder = config.VISUALIZATION_PATH / algorithm / "per_dataset"
         makedirs(folder, exist_ok=True)
-        plt.savefig("{0}/{1}_scatter_plot{2}.png".format(folder, dataset ,"_delta" if delta else ""))
+        plt.savefig("{0}/{1}_scatter_plot.png".format(folder, dataset))
 
 def scatter_plots_mean(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
     datasets = algorithm_data["datasets"]
@@ -127,11 +127,9 @@ if __name__ == "__main__":
     colors = generate_distinct_colors(datasets)
     for algorithm, data in metrics_data.get_per_algorithm_data("Neighbor metrics"):
         print("Processing algorithm {}".format(algorithm))
-        scatter_plots(data, algorithm, colors, delta=True)
-        scatter_plots(data, algorithm, colors, delta=False)
-        scatter_plots_per_dataset(data, algorithm, colors, delta=False)
-        scatter_plots_per_dataset(data, algorithm, colors, delta=True)
-        scatter_plots_mean(data, algorithm, colors, delta=True)
-        scatter_plots_mean(data, algorithm, colors, delta=False)
-        
+        scatter_plots(data, algorithm, colors)
+        scatter_plots_per_dataset(data, algorithm, colors)
+    neighbor_data = metrics_data.get_per_algorithm_data("Neighbor metrics")
+    ground_truth_data = metrics_data.get_per_algorithm_data("Ground truth metrics")
+    
             

@@ -3,25 +3,47 @@ import algorithms
 import importlib
 import json
 import re
-from os import environ, listdir, path
+import sys
+from matplotlib import pyplot as plt
+from os import environ, listdir, path, makedirs
+sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
+import config
 def natural_sort_key(s, _nsre=re.compile(r'(\d+)')):
     return [int(text) if text.isdigit() else text.lower()
             for text in _nsre.split(s)]
 data_paths = sorted(json.loads(environ["paths"]), key=natural_sort_key)
 used_algorithms = set(json.loads(environ["algorithms"]))
+experiment = environ["experiment"] == "True"
 parameters = {}
-for index, data_path in enumerate(reversed(data_paths)):
-    data = ImageData(data_path)
-    print("Processing {0}".format(data.settings["name"]))
-    if (data.settings["name"] not in parameters.keys()):
-        parameters[data.settings["name"]] = {}
-    for algorithm in used_algorithms.intersection(algorithms.__all__):
-        saved_parameters = data.check_if_done(algorithm)
-        if index == 0 and saved_parameters is not None:
-            parameters[data.settings["name"]][algorithm] = saved_parameters
-        if not (path.isdir(data.get_folder(algorithm))):
-            has_parameters = algorithm in parameters[data.settings["name"]].keys()
-            segmented, params = importlib.import_module("algorithms.{}".format(algorithm)).segment(data, parameters[data.settings["name"]][algorithm] if has_parameters else None)
-            if not has_parameters:
-                parameters[data.settings["name"]][algorithm] = params
-            data.save_result(segmented, params, algorithm)
+
+if experiment:
+    for data_path in reversed(data_paths):
+        if "8" in data_path.split("/")[-1]:
+            print(data_path)
+            data = ImageData(data_path)
+            print("Processing {0}".format(data.settings["name"]))
+            for algorithm in used_algorithms.intersection(algorithms.__all__):
+                result = importlib.import_module("algorithms.{}".format(algorithm)).parameters_experiment(data)
+                folder = config.VISUALIZATION_PATH / "parameters" / algorithm / data.settings["name"]
+                makedirs(folder, exist_ok=True)
+                for i, title in enumerate(result["title"]):
+                    plt.clf()
+                    plt.scatter(result["x"][i], result["y"][i], label=title)
+                    plt.legend()
+                    plt.savefig("{0}/{1}_scatter_plot{2}.png".format(folder, title , str(i)))
+else:
+    for index, data_path in enumerate(reversed(data_paths)):
+        data = ImageData(data_path)
+        print("Processing {0}".format(data.settings["name"]))
+        if (data.settings["name"] not in parameters.keys()):
+            parameters[data.settings["name"]] = {}
+        for algorithm in used_algorithms.intersection(algorithms.__all__):
+            saved_parameters = data.check_if_done(algorithm)
+            if index == 0 and saved_parameters is not None:
+                parameters[data.settings["name"]][algorithm] = saved_parameters
+            if not (path.isdir(data.get_folder(algorithm))):
+                has_parameters = algorithm in parameters[data.settings["name"]].keys()
+                segmented, params = importlib.import_module("algorithms.{}".format(algorithm)).segment(data, parameters[data.settings["name"]][algorithm] if has_parameters else None)
+                if not has_parameters:
+                    parameters[data.settings["name"]][algorithm] = params
+                data.save_result(segmented, params, algorithm)

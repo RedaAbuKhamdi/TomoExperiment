@@ -41,12 +41,13 @@ def run_generation(dataset_paths, settings):
         check=True
     )
 
-def run_binarization():
+def run_binarization(experiment : bool = False):
     env_for_binarization = environ.copy()
     env_for_binarization["paths"] = list_reconstruction_paths()
     env_for_binarization["prefix"] = config.RECONSTRUCTION_PATH.as_posix()
-    env_for_binarization["algorithms"] = json.dumps(["niblack_3d", "otsu", "brute"])
+    env_for_binarization["algorithms"] = json.dumps(["beta_niblack_3d", "niblack_3d", "otsu", "brute"])
     env_for_binarization["USERPROFILE"] = getcwd()
+    env_for_binarization["experiment"] = str(experiment)  
     return subprocess.run(
         ["conda", "run", "--live-stream", "-n", CONDA_ENV, "python", "-u", "./segmentation/driver.py"],
         env=env_for_binarization,
@@ -110,7 +111,7 @@ if len(sys.argv) > 1:
             run_generation(dataset_paths, settings[i])
         if "2" in sys.argv[1]:
             print("Running binarization")
-            run_binarization()
+            run_binarization(True if len(sys.argv) > 2 and sys.argv[2] == "experiment" else False)
         if "3" in sys.argv[1]:
             run_evaluation()
         if "4" in sys.argv[1]:

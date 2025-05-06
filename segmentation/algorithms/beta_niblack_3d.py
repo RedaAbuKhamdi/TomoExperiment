@@ -1,147 +1,137 @@
-import math
-import numpy as np
 import tqdm
-from numba import jit, prange
+import numpy as np
 from imagedata import ImageData
-from metrics import jaccard
 
-# Precompute the integral images (summed-volume tables)
-@jit(nopython=True, fastmath=True, parallel=True)
-def compute_integrals(image: np.ndarray, integral: np.ndarray, integral_sq: np.ndarray):
-    D, H, W = image.shape
-    for x in range(1, D + 1):
-        for y in range(1, H + 1):
-            for z in range(1, W + 1):
-                val = image[x - 1, y - 1, z - 1]
-                integral[x, y, z] = (
-                    val +
-                    integral[x - 1, y,   z] +
-                    integral[x,   y - 1, z] +
-                    integral[x,   y,   z - 1] -
-                    integral[x - 1, y - 1, z] -
-                    integral[x - 1, y,   z - 1] -
-                    integral[x,   y - 1, z - 1] +
-                    integral[x - 1, y - 1, z - 1]
-                )
-                integral_sq[x, y, z] = (
-                    val * val +
-                    integral_sq[x - 1, y,   z] +
-                    integral_sq[x,   y - 1, z] +
-                    integral_sq[x,   y,   z - 1] -
-                    integral_sq[x - 1, y - 1, z] -
-                    integral_sq[x - 1, y,   z - 1] -
-                    integral_sq[x,   y - 1, z - 1] +
-                    integral_sq[x - 1, y - 1, z - 1]
-                )
+import cupy as cp
+import cupyx.scipy.ndimage as ndi_gpu
 
-# Thresholding using precomputed integral images.
-@jit(nopython=True, fastmath=True, parallel=True)
-def thresholding_precomputed(result: np.ndarray, image: np.ndarray,
-                             integral: np.ndarray, integral_sq: np.ndarray,
-                             q: float, window: int, beta : float):
-    # image is assumed to be 3D: (D, H, W)
-    D, H, W = image.shape
-    r = window // 2
 
-    for x in prange(D):
-        for y in range(H):
-            for z in range(W):
-                # Clamp window boundaries
-                x0 = x - r if x - r >= 0 else 0
-                y0 = y - r if y - r >= 0 else 0
-                z0 = z - r if z - r >= 0 else 0
-                x1 = x + r if x + r < D else D - 1
-                y1 = y + r if y + r < H else H - 1
-                z1 = z + r if z + r < W else W - 1
+def thresholding_niblack_gpu(img_gpu: cp.ndarray,
+                             q: float,
+                             mean: cp.ndarray,
+                             std: cp.ndarray,
+                             beta: float) -> cp.ndarray:
+    """
+    Perform Niblack threshold:
+      seg = img >= (mean_local + q * std_local)
+    entirely on the GPU.
+    """
+    img_f = img_gpu.astype(cp.float32)
+    return img_f - beta >= (mean + std * q)
 
-                count = (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1)
-                # Use inclusion-exclusion with precomputed integrals.
-                sum_val = (integral[x1 + 1, y1 + 1, z1 + 1] -
-                           integral[x0,     y1 + 1, z1 + 1] -
-                           integral[x1 + 1, y0,     z1 + 1] -
-                           integral[x1 + 1, y1 + 1, z0] +
-                           integral[x0,     y0,     z1 + 1] +
-                           integral[x0,     y1 + 1, z0] +
-                           integral[x1 + 1, y0,     z0] -
-                           integral[x0,     y0,     z0])
-                sum_sq_val = (integral_sq[x1 + 1, y1 + 1, z1 + 1] -
-                              integral_sq[x0,     y1 + 1, z1 + 1] -
-                              integral_sq[x1 + 1, y0,     z1 + 1] -
-                              integral_sq[x1 + 1, y1 + 1, z0] +
-                              integral_sq[x0,     y0,     z1 + 1] +
-                              integral_sq[x0,     y1 + 1, z0] +
-                              integral_sq[x1 + 1, y0,     z0] -
-                              integral_sq[x0,     y0,     z0])
-                mean = sum_val / count
-                var = sum_sq_val / count - mean * mean
-                if var < 0:
-                    var = 0.0
-                std = math.sqrt(var)
-                thresh = mean + q * std + beta
 
-                result[x, y, z] = 1 if image[x, y, z] > thresh else 0
+def calculate_mean_std_gpu(img_gpu: cp.ndarray, window: int) -> tuple:
+    img_f = img_gpu.astype(cp.float32)
+    mean   = ndi_gpu.uniform_filter(img_f,      size=window, mode="reflect")
+    meansq = ndi_gpu.uniform_filter(img_f*img_f, size=window, mode="reflect")
+    std    = cp.sqrt(cp.abs(meansq - mean*mean))
+    return mean, std
 
 def segment(imageData: ImageData, params: dict = None):
     print("Start Niblack")
-    img = imageData.image
-    D, H, W = img.shape
-    best_image = np.zeros(img.shape, dtype=np.uint8)
-    best_val = 0.0
-    best_beta = params["beta"] if params is not None else np.min(img)
-    best_k = params["k"] if params is not None else 0.0
-    best_window = int(params["w"]) if params is not None else 25
 
-    # Precompute the integral images once.
-    integral = np.zeros((D + 1, H + 1, W + 1), dtype=img.dtype)
-    integral_sq = np.zeros((D + 1, H + 1, W + 1), dtype=img.dtype)
-    compute_integrals(img, integral, integral_sq)
+    best_val    = 0.0
+    best_k      = params["k"] if params else 0.0
+    best_window = params["w"] if params else 10
+    best_image  = None
 
-    if params is not None:
-        segmentation = np.zeros(img.shape, dtype=np.uint8)
-        thresholding_precomputed(segmentation, img, integral, integral_sq, best_k, best_window, best_beta)
-        mean_metric = 0.0
-        gt_count = 0
-        for index, ground_truth_slice in imageData.get_ground_truth_slices():
-            segmented_slice = segmentation[index]
-            mean_metric += jaccard(segmented_slice, ground_truth_slice)
-            gt_count += 1
-        mean_metric /= gt_count
-        best_val = mean_metric
-        best_image = segmentation.copy()
+    # 1) upload raw image once
+    img_gpu = cp.asarray(imageData.image, dtype=cp.float32)
+    
+    beta = cp.std(img_gpu).item()
+
+    if params:
+        # single (w,k) provided → just compute and return
+        mean, std = calculate_mean_std_gpu(img_gpu, best_window, beta)
+        seg_gpu    = thresholding_niblack_gpu(img_gpu, best_k, mean, std)
+        best_image = cp.asnumpy(seg_gpu)
+
     else:
-        # Define search ranges.
-        ks = np.linspace(-2, 2, 40)
-        betas = np.array([0, np.min(img), np.std(img)])
-        max_window = max(1, min(min(img.shape) // 2, 500))
-        # Create a range of window sizes from best_window up to max_window.
-        windows = np.arange(best_window, max_window, 
-                            (max_window - best_window) // 30 if max_window > best_window else 1, 
+        shape   = imageData.image.shape
+        ks      = np.linspace(-2, 1, 100)
+        max_w   = max(1, min(2 * min(shape)//3, 250))
+        windows = np.arange(best_window, max_w,
+                            max(1, (max_w - best_window)//15),
                             dtype=np.int16)
-        for window in tqdm.tqdm(windows, desc="Window sizes"):
-            for i in tqdm.tqdm(range(ks.size), desc="k values", leave=False):
-                for j in tqdm.tqdm(range(betas.size), desc="beta values", leave=False):
-                    segmentation = np.zeros(img.shape, dtype=np.uint8)
-                    thresholding_precomputed(segmentation, img, integral, integral_sq, ks[i], window, betas[j])
-                    mean_metric = 0.0
-                    gt_count = 0
-                    for index, ground_truth_slice in imageData.get_ground_truth_slices():
-                        segmented_slice = segmentation[index]
-                        mean_metric += jaccard(segmented_slice, ground_truth_slice)
-                        gt_count += 1
-                    mean_metric /= gt_count
 
-                    if mean_metric > best_val:
-                        print(f"Improved metric: {mean_metric}")
-                        best_val = mean_metric
-                        best_k = ks[i]
-                        best_beta = betas[j]
-                        best_image = segmentation.copy()
-                        best_window = window
+        # 2) pull GT once and move to GPU
+        gt_slices = list(imageData.get_ground_truth_slices())
+        gt_gpu    = [(idx, cp.asarray(gt, dtype=cp.bool_))
+                     for idx, gt in gt_slices]
 
-    params = {
-        "k": float(best_k),
-        "w": int(best_window),
-        "beta": float(best_beta),
-        "jaccard": float(best_val)
+        # 3) sweep (window, k)
+        for window in tqdm.tqdm(windows, desc="Window"):
+            mean, std = calculate_mean_std_gpu(img_gpu, window)
+            for q in tqdm.tqdm(ks, desc="k"):
+                seg_gpu = thresholding_niblack_gpu(img_gpu, q, mean, std, beta)
+
+                # 4) GPU‐side Jaccard average
+                total = 0.0
+                for idx, gt_slice_gpu in gt_gpu:
+                    sg = seg_gpu[idx]               # boolean 2D cupy array
+                    I  = cp.logical_and(sg, gt_slice_gpu).sum().item()
+                    U  = cp.logical_or (sg, gt_slice_gpu).sum().item()
+                    if (U > 0):
+                        total += (I / U)
+                mean_metric = total / len(gt_gpu)
+
+                # 5) track best
+                if mean_metric > best_val:
+                    best_val    = mean_metric
+                    best_k      = float(q)
+                    best_window = int(window)
+                    best_image  = cp.asnumpy(seg_gpu)
+
+    out_params = {"k": best_k, "w": best_window, "beta": beta}
+    if best_val > 0:
+        out_params["jaccard"] = best_val
+    return best_image, out_params
+
+
+def parameters_experiment(imageData: ImageData):
+    print("Start Niblack")
+
+    # 1) upload raw image once
+    img_gpu = cp.asarray(imageData.image, dtype=cp.float32)
+    beta = cp.std(img_gpu)
+
+    shape   = imageData.image.shape
+    ks      = np.linspace(-5, 5, 100)
+    max_w   = max(1, min(2 * min(shape)//3, 250))
+    windows = np.arange(5, max_w,
+                        max(1, (max_w - 5)//15),
+                        dtype=np.int16)
+
+    # 2) pull GT once and move to GPU
+    gt_slices = list(imageData.get_ground_truth_slices())
+    gt_gpu    = [(idx, cp.asarray(gt, dtype=cp.bool_))
+                    for idx, gt in gt_slices]
+    result = {
+        "title": [],
+        "x": [],
+        "y": []
     }
-    return best_image, params
+    # 3) sweep (window, k)
+    for i, window in tqdm.tqdm(enumerate(windows), desc="Window"):
+        mean, std = calculate_mean_std_gpu(img_gpu, window)
+        result["title"].append(f"w={window}")
+        result["x"].append(ks)
+        result["y"].append(np.zeros_like(ks))
+        for j, q in tqdm.tqdm(enumerate(ks), desc="k"):
+            seg_gpu = thresholding_niblack_gpu(img_gpu, q, mean, std, beta)
+
+            # 4) GPU‐side Jaccard average
+            total = 0.0
+            for idx, gt_slice_gpu in gt_gpu:
+                sg = seg_gpu[idx]               # boolean 2D cupy array
+                I  = cp.logical_and(sg, gt_slice_gpu).sum().item()
+                U  = cp.logical_or (sg, gt_slice_gpu).sum().item()
+                if (U > 0):
+                    total += (I / U)
+            mean_metric = total / len(gt_gpu)
+            result["y"][i][j] = mean_metric
+
+    return result
+            
+
+    

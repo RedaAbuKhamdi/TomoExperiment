@@ -1,7 +1,4 @@
-import json
 import sys
-import pathlib
-import os
 import pandas as pd
 import numpy as np
 
@@ -95,3 +92,4 @@ class MetricsData:
                             for metric in evaluation_data:
                                 algorithm_data["metric_values"][dataset_config["name"]][metric] = evaluation_data[metric].to_numpy()
             yield algorithm, algorithm_data
+    

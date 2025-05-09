@@ -174,7 +174,7 @@ def sliding_window_has_zero_3d_gpu(arr, radius):
     return out
 
 def evaluate(segmentation, ground_truth):
-    radius = 5
+    radius = 2
     ground_truth[ground_truth > 0] = 1
     segmentation[segmentation > 0] = 1
     cp_seg = cp.asarray(segmentation, dtype=cp.int32)

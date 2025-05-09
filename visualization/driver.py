@@ -1,8 +1,4 @@
-import json
 import sys
-import pathlib
-import os
-import pandas as pd
 import numpy as np
 
 from os import environ, listdir, makedirs, path
@@ -155,7 +151,7 @@ if __name__ == "__main__":
     
     for algorithm in metrics_data.get_algorithms():
         print("Processing algorithm {} - thresholds".format(algorithm))
-        thresholds = np.arange(0, 1, 0.01)
+        thresholds = np.arange(0, 1.1, 0.05)
         for metric in ["iou", "boundarydice"]:
             angles = []
             metrics = []
@@ -165,11 +161,20 @@ if __name__ == "__main__":
                 metrics.append(metric_value)
             angles = np.array(angles)
             metrics = np.array(metrics) 
+            angles_gt, mean_metrics_gt = metrics_data.get_mean_ground_truth(algorithm, metric)
             plt.clf()
-            plt.scatter(angles, metrics, label = "Threshold")
-            plt.title("Mean {} values by angle for each threshold".format(metric))
-            plt.xlabel("angles")
-            plt.ylabel("Metric Value")
+            fig, ax = plt.subplots(figsize=(8,5), dpi=120)
+            ax.plot(angles,        metrics,        marker='o', linestyle='-',  label='Thresholds')
+            ax.plot(angles_gt,     mean_metrics_gt,marker='s', linestyle='--', label='GT Mean')
+            ax.set_xscale('log', base=2)
+            ax.set_xticks(angles_gt)
+            ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
+            ax.set_xlabel("Number of Angles")
+            ax.set_ylabel(f"Mean {metric.title()}")
+            ax.set_ylim(0,1)
+            ax.grid(axis='y', linestyle='--', alpha=0.5)
+            ax.grid(axis='x', linestyle='--', alpha=0.5)
+            ax.legend()
             plt.tight_layout()
             plt.legend()
             folder = config.VISUALIZATION_PATH / "threshold" / algorithm
@@ -178,4 +183,3 @@ if __name__ == "__main__":
         for algorithm, data in metrics_data.get_per_algorithm_data("Ground truth metrics"):
             print("Processing algorithm {}".format(algorithm))
             scatter_plots_per_dataset_ground_truth(data, algorithm, colors)
-            scatter_plots_mean_ground_truth(data, algorithm, colors)

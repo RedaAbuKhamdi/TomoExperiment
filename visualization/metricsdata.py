@@ -100,6 +100,22 @@ class MetricsData:
                             for metric in evaluation_data:
                                 algorithm_data["metric_values"][dataset_config["name"]][metric] = evaluation_data[metric].to_numpy()
             yield algorithm, algorithm_data
+
+    def get_mean_ground_truth(self, algorithm : str, metric : str):
+        for algorithm, data in self.get_per_algorithm_data():
+            if algorithm == algorithm:
+                angles = data["angles"]
+                mean_gt_metric = np.zeros_like(angles, dtype=np.float64)
+                amount = 0
+                for dataset in data["datasets"]:
+                    if metric not in data["metric_values"][dataset].keys():
+                        raise Exception("Metric {} not found".format(metric))
+                    gt_metrics = data["metric_values"][dataset][metric]["Ground truth metrics"]
+                    mean_gt_metric += gt_metrics
+                    amount += 1
+                mean_gt_metric /= amount
+                return angles, mean_gt_metric
+        raise Exception("Algorithm {} not found".format(algorithm))
     
     def get_threshold_data(self, threshold : float, algorithm : str, metric : str):
         for algorithm, data in self.get_per_algorithm_data():
@@ -107,7 +123,6 @@ class MetricsData:
                 mean_angle = 0
                 mean_gt_metric = 0
                 amount = 0
-                angles_added = []
                 for dataset in data["datasets"]:
                     angles = data["angles"]
                     if metric not in data["metric_values"][dataset].keys():
@@ -117,12 +132,13 @@ class MetricsData:
                     for i in range(neighbor_metrics.shape[0]):
                         if neighbor_metrics[i] > threshold:
                             amount += 1
-                            mean_angle += angles[i + 1]
-                            angles_added.append("(" + str(angles[i + 1]) + " " + dataset + ")")
+                            mean_angle += angles[i]
                             mean_gt_metric += gt_metrics[i]
                             break
-                # print("angles pre normalization {}, thresh = {}".format(mean_angle, threshold))
-                # print("angles added {}".format(" ".join(angles_added)))
+                    else:
+                        amount += 1
+                        mean_angle += angles[-1]
+                        mean_gt_metric += gt_metrics[-1]
                 if amount > 0:
                     mean_angle /= amount
                     mean_gt_metric /= amount

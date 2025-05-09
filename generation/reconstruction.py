@@ -32,9 +32,6 @@ class Reconstruction:
         sinogram_id = self.data.calculate_sinogram(None, proj_geom)
         self.sinogram = sinogram_id
         return sinogram_id
-    
-    def add_noise_to_projection(self, sinogram_id):
-        pass
 
     def reconstruct(self, iterations : int,  algorithm : str):
         if self.sinogram is None:

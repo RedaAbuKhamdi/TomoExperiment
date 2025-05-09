@@ -51,7 +51,7 @@ class Data:
         self.data_id = astra.data3d.create("-vol", self.data_geometry, data = image)
         self.sinogram_id = astra.create_sino3d_gpu(self.data_id, projection_geometry, self.data_geometry, returnData = False)
         phantom = astra.data3d.get(self.sinogram_id)
-        phantom = phantom + np.random.normal(0, 0.05)
+        phantom = phantom + np.random.normal(0, 0.15)
         astra.data3d.store(self.sinogram_id, phantom)
         return self.sinogram_id
     def __del__(self):

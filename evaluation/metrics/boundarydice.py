@@ -174,28 +174,40 @@ def sliding_window_has_zero_3d_gpu(arr, radius):
     return out
 
 def evaluate(segmentation, ground_truth):
-    radius = 2
-    ground_truth[ground_truth > 0] = 1
-    segmentation[segmentation > 0] = 1
-    cp_seg = cp.asarray(segmentation, dtype=cp.int32)
-    cp_gt = cp.asarray(ground_truth, dtype=cp.int32)
-    has_0_seg = sliding_window_has_zero_3d_gpu(cp_seg, radius)
-    has_0_gt = sliding_window_has_zero_3d_gpu(cp_gt, radius)
-    boundary_seg = cp.argwhere(cp.logical_and(cp_seg, has_0_seg))
-    boundary_gt = cp.argwhere(cp.logical_and(cp_gt, has_0_gt))
-    intersections = sliding_window_sum_3d_gpu(cp.logical_and(cp_seg, cp_gt), radius)
-    seg_sum = sliding_window_sum_3d_gpu(cp_seg, radius)
-    gt_sum = sliding_window_sum_3d_gpu(cp_gt, radius)
-    print("Boundary dice")
-    result = 0
-    for indices in [boundary_seg, boundary_gt]:
-        idx0 = indices[:, 0]
-        idx1 = indices[:, 1]
-        idx2 = indices[:, 2]
-        numerator = 2 * intersections[idx0, idx1, idx2]
-        denominator = seg_sum[idx0, idx1, idx2] + gt_sum[idx0, idx1, idx2]
-        temp = numerator / denominator
-        result += cp.sum(temp)
-       
+    radius = 1
 
-    return float(result / (boundary_gt.shape[0] + boundary_seg.shape[0]))
+    # binarize
+    ground_truth = (ground_truth > 0).astype(np.int32)
+    segmentation = (segmentation > 0).astype(np.int32)
+
+    # upload
+    cp_seg = cp.asarray(segmentation, dtype=cp.int32)
+    cp_gt  = cp.asarray(ground_truth,  dtype=cp.int32)
+
+    # 1) detect *all* boundary voxels (including interior holes) via has‐zero
+    has0_seg = sliding_window_has_zero_3d_gpu(cp_seg, radius)
+    has0_gt  = sliding_window_has_zero_3d_gpu(cp_gt,  radius)
+    b_seg = (cp_seg & has0_seg).astype(cp.int32)
+    b_gt  = (cp_gt  & has0_gt ).astype(cp.int32)
+
+    # 2) compute local sums *only* on those boundary masks
+    I_map   = sliding_window_sum_3d_gpu(b_seg & b_gt, radius)
+    S_seg   = sliding_window_sum_3d_gpu(b_seg,       radius)
+    S_gt    = sliding_window_sum_3d_gpu(b_gt,        radius)
+
+    # 3) sample coordinates of each boundary set
+    zs_seg, ys_seg, xs_seg = cp.where(b_seg)
+    zs_gt,  ys_gt,  xs_gt  = cp.where(b_gt)
+
+    # 4) compute local Dice at each boundary point
+    dice_seg = 2 * I_map[zs_seg,ys_seg,xs_seg] / (
+                  S_seg[zs_seg,ys_seg,xs_seg] + S_gt[zs_seg,ys_seg,xs_seg]
+               )
+    dice_gt  = 2 * I_map[zs_gt, ys_gt, xs_gt] / (
+                  S_seg[zs_gt, ys_gt, xs_gt]  + S_gt[zs_gt, ys_gt, xs_gt]
+               )
+
+    # 5) average
+    total = dice_seg.sum() + dice_gt.sum()
+    count = zs_seg.size + zs_gt.size
+    return float((total / count).item())

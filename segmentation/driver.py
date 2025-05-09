@@ -1,37 +1,23 @@
-from imagedata import ImageData
 import algorithms
 import importlib
 import json
 import re
 import sys
+
 from matplotlib import pyplot as plt
-from os import environ, listdir, path, makedirs
+from os import environ, path, makedirs
+
+from imagedata import ImageData
+
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 import config
+
 def natural_sort_key(s, _nsre=re.compile(r'(\d+)')):
     return [int(text) if text.isdigit() else text.lower()
             for text in _nsre.split(s)]
-data_paths = sorted(json.loads(environ["paths"]), key=natural_sort_key)
-used_algorithms = set(json.loads(environ["algorithms"]))
-experiment = environ["experiment"] == "True"
-parameters = {}
 
-if experiment:
-    for data_path in reversed(data_paths):
-        if "8" in data_path.split("/")[-1]:
-            print(data_path)
-            data = ImageData(data_path)
-            print("Processing {0}".format(data.settings["name"]))
-            for algorithm in used_algorithms.intersection(algorithms.__all__):
-                result = importlib.import_module("algorithms.{}".format(algorithm)).parameters_experiment(data)
-                folder = config.VISUALIZATION_PATH / "parameters" / algorithm / data.settings["name"]
-                makedirs(folder, exist_ok=True)
-                for i, title in enumerate(result["title"]):
-                    plt.clf()
-                    plt.scatter(result["x"][i], result["y"][i], label=title)
-                    plt.legend()
-                    plt.savefig("{0}/{1}_scatter_plot{2}.png".format(folder, title , str(i)))
-else:
+def run_segmentation(data_paths, used_algorithms):
+    parameters = {}
     for index, data_path in enumerate(reversed(data_paths)):
         data = ImageData(data_path)
         print("Processing {0}".format(data.settings["name"]))
@@ -47,3 +33,21 @@ else:
                 if not has_parameters:
                     parameters[data.settings["name"]][algorithm] = params
                 data.save_result(segmented, params, algorithm)
+
+def run_parameters_experiments(data_paths, used_algorithms):
+    for data_path in reversed(data_paths):
+        if "8" in data_path.split("/")[-1]:
+            print(data_path)
+            data = ImageData(data_path)
+            print("Processing {0}".format(data.settings["name"]))
+            for algorithm in used_algorithms.intersection(algorithms.__all__):
+                importlib.import_module("algorithms.{}".format(algorithm)).parameters_experiment(data)
+
+
+data_paths = sorted(json.loads(environ["paths"]), key=natural_sort_key)
+used_algorithms = set(json.loads(environ["algorithms"]))
+experiment = environ["experiment"] == "True"
+if experiment:
+    run_parameters_experiments(data_paths, used_algorithms)
+else:
+    run_segmentation(data_paths, used_algorithms)

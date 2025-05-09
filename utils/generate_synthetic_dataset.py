@@ -10,12 +10,12 @@ from grid import Grid3DGenerator
 from gaussian import SyntheticGaussianImage
 
 
-def save_dataset(image, dataset_name):
+def save_dataset(image, dataset_name, parameters):
     folder = "../data/" + dataset_name
     os.makedirs(folder, exist_ok=True)
 
     for k in range(image.shape[0]):
-        slice = PIL.Image.fromarray(np.uint8(image[k] + np.random.normal(20, 5, image[k].shape)) , 'L')
+        slice = PIL.Image.fromarray(np.uint8(image[k]) , 'L')
         slice.save(folder + "/" + str(k) + ".png")
 
     with open(folder + "/settings.json", "w") as f:
@@ -30,7 +30,8 @@ def save_dataset(image, dataset_name):
             "columns": 800
         },
         "iterations": 120,
-        "algorithm": "SIRT3D_CUDA"
+        "algorithm": "SIRT3D_CUDA",
+        "generation_parameters": json.dumps(parameters)
     }))
     
 def save_ground_truth(image, dataset_name):
@@ -41,18 +42,23 @@ def save_ground_truth(image, dataset_name):
         slice.save(folder + "/" + str(k) + ".png")
 
 dataset_name = input("Which dataset to generate (ellipses, polygons, grid)")
+parameters = {}
 if ("polygons" in dataset_name):
-    image = PolygonSceneGenerator().generate_dataset(np.zeros((256, 512, 512)), float(input("Cluster radius: "))) * 124
+    image, parameters = PolygonSceneGenerator().generate_dataset(np.zeros((256, 512, 512)), float(input("Cluster radius: ")))
+    image *= 124
 elif dataset_name == "ellipses":
-    image = SyntheticEllipsesImage().generate_dataset(np.zeros((256, 512, 512)), 3)
+    image, parameters = SyntheticEllipsesImage().generate_dataset(np.zeros((256, 512, 512)), 3)
 elif dataset_name == "anglegrid":
-    image = Grid3DGenerator.generate_dataset(64, 5, True) * 104
+    image, parameters = Grid3DGenerator.generate_dataset(64, 5, True)
+    image *= 104
 elif dataset_name == "grid":
-    image = Grid3DGenerator.generate_dataset(64, 5, False) * 104
+    image, parameters = Grid3DGenerator.generate_dataset(64, 5, False)
+    image *= 104
 elif dataset_name == "gaussian":
-    image = SyntheticGaussianImage().generate_dataset(np.zeros((256, 512, 512))) * 104
+    image, parameters = SyntheticGaussianImage().generate_dataset(np.zeros((256, 512, 512)))
+    image *= 104
 else:
     raise Exception("Unknown dataset name")
 
 save_ground_truth(image, dataset_name)
-save_dataset(image, dataset_name)
+save_dataset(image, dataset_name, parameters)

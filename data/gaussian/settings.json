@@ -1,1 +1,1 @@
-{"name": "gaussian", "detector_spacing": {"x": 1, "y": 1}, "detector_count": {"rows": 800, "columns": 800}, "iterations": 120, "algorithm": "SIRT3D_CUDA"}
+{"name": "gaussian", "detector_spacing": {"x": 1, "y": 1}, "detector_count": {"rows": 800, "columns": 800}, "iterations": 120, "algorithm": "SIRT3D_CUDA", "generation_parameters": "{\"gaussian1\": \"roll\", \"gaussian2\": \"pitch\"}"}

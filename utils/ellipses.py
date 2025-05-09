@@ -34,6 +34,6 @@ class SyntheticEllipsesImage:
         for cube_center in tqdm(break_down_volume(image, cube_amount)):
             paint_ellipse(image, cube_center, np.random.randint(min_radius, max_radius), np.random.randint(min_radius, max_radius), np.random.randint(min_radius, max_radius), 210 // cube_amount)
         print(np.unique(image))
-        return image
+        return image, {}
 
     

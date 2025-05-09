@@ -2,6 +2,7 @@ import numpy as np
 import cupy as cp
 from typing import Tuple
 from skimage.draw import polygon
+from transformations import choose_random_rotate
 import scipy.ndimage as ndi
 
 # ─── Utility Functions ─────────────────────────────────────────────────────────
@@ -42,23 +43,6 @@ class Pyramid:
             v2 = base[(i + 1) % m]
             self.faces.append((apex, v1, v2))
 
-# ─── Transforms ────────────────────────────────────────────────────────────────
-
-def random_rotation_matrix() -> np.ndarray:
-    u1, u2, u3 = np.random.rand(3)
-    q = np.array([
-        np.sqrt(1 - u1) * np.sin(2 * np.pi * u2),
-        np.sqrt(1 - u1) * np.cos(2 * np.pi * u2),
-        np.sqrt(u1)       * np.sin(2 * np.pi * u3),
-        np.sqrt(u1)       * np.cos(2 * np.pi * u3),
-    ])
-    x, y, z, w = q
-    return np.array([
-        [1 - 2*(y*y + z*z),   2*(x*y - z*w),     2*(x*z + y*w)],
-        [2*(x*y + z*w),       1 - 2*(x*x + z*z), 2*(y*z - x*w)],
-        [2*(x*z - y*w),       2*(y*z + x*w),     1 - 2*(x*x + y*y)]
-    ])
-
 def apply_transform(pts: np.ndarray,
                     R: np.ndarray,
                     T: np.ndarray,
@@ -75,38 +59,53 @@ def place_pyramid(volume: np.ndarray,
                   center: np.ndarray,
                   cluster_radius: float):
     unit = np.vstack([base, apex[np.newaxis, :]])
-    # transform
+    # 1) choose random scale
     s = np.random.uniform(*scale_range)
-    R = random_rotation_matrix()
+
+    # 2) choose a random principal‐axis rotation
+    angle = np.random.uniform(0, 2 * np.pi)
+    R, axis_name = choose_random_rotate(angle)
+    # 3) random translation around center
     T = center + np.random.normal(scale=cluster_radius, size=3)
+
+    # 4) apply scale, rotate, translate
     pts3d = apply_transform(unit, R, T, s)
     base3d, apex3d = pts3d[:-1], pts3d[-1]
     shp = Pyramid(apex3d, base3d)
-    # normals & offsets
+
+    # 5) compute face normals and offsets
     normals = np.stack([
-        np.cross(v2 - v1, v3 - v1) * (1 if np.dot(np.cross(v2 - v1, v3 - v1), pts3d.mean(axis=0) - v1) >= 0 else -1)
+        np.cross(v2 - v1, v3 - v1) *
+        (1 if np.dot(np.cross(v2 - v1, v3 - v1),
+                     pts3d.mean(axis=0) - v1) >= 0 else -1)
         for v1, v2, v3 in shp.faces
     ])
     ds = -np.einsum('ij,ij->i', normals, np.array([v1 for v1, _, _ in shp.faces]))
-    # bbox clamp
+
+    # 6) compute axis-aligned bbox
     mins = np.floor(pts3d.min(axis=0)).astype(int)
     maxs = np.ceil(pts3d.max(axis=0)).astype(int)
     D, H, W = volume.shape
     x0, x1 = max(0, mins[0]), min(W - 1, maxs[0])
     y0, y1 = max(0, mins[1]), min(H - 1, maxs[1])
     z0, z1 = max(0, mins[2]), min(D - 1, maxs[2])
-    # GPU grid
+
+    # 7) rasterize on GPU
     gz = cp.arange(z0, z1 + 1)
     gy = cp.arange(y0, y1 + 1)
     gx = cp.arange(x0, x1 + 1)
     Z, Y, X = cp.meshgrid(gz, gy, gx, indexing='ij')
     coords = cp.stack((X, Y, Z), axis=-1)
-    cn = cp.asarray(normals)[:, None, None, None, :]
+
+    cn  = cp.asarray(normals)[:, None, None, None, :]
     cds = cp.asarray(ds)[:, None, None, None]
     lhs = (cn * coords[None, ...]).sum(axis=-1)
     mask = cp.all(lhs + cds >= 0, axis=0)
+
+    # 8) write back to CPU volume
     mask_cpu = cp.asnumpy(mask)
     volume[z0:z1 + 1, y0:y1 + 1, x0:x1 + 1][mask_cpu] = 1
+    return angle, axis_name
 
 # ─── Hexagon Placement in Free Space ───────────────────────────────────────────
 
@@ -201,12 +200,21 @@ class PolygonSceneGenerator:
         scales = ((170, 250), (170, 250))
         D, H, W = volume.shape
         center = np.array([W/2, H/2, D/2], float)
-        place_pyramid(volume, unit_rect_apex, unit_rect_base,
+        angle1, axis_name_1 = place_pyramid(volume, unit_rect_apex, unit_rect_base,
                       scales[0], center, cluster_radius)
         print("Pyramid 1 placed")
-        place_pyramid(volume, unit_tri_apex, unit_tri_base,
+        angle2, axis_name_2 = place_pyramid(volume, unit_tri_apex, unit_tri_base,
                       scales[1], center, cluster_radius)
         print("Pyramid 2 placed")
         place_hexagon_in_free(volume)
         print("Hexagon placed")
-        return volume
+        return volume, {
+            "pyramid1": {
+                "angle": angle1,
+                "axis": axis_name_1
+            },
+            "pyramid2": {
+                "angle": angle2,
+                "axis": axis_name_2
+            }
+        }

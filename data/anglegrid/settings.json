@@ -1,1 +1,1 @@
-{"name": "anglegrid", "detector_spacing": {"x": 1, "y": 1}, "detector_count": {"rows": 800, "columns": 800}, "iterations": 120, "algorithm": "SIRT3D_CUDA"}
+{"name": "anglegrid", "detector_spacing": {"x": 1, "y": 1}, "detector_count": {"rows": 800, "columns": 800}, "iterations": 120, "algorithm": "SIRT3D_CUDA", "generation_parameters": "{\"roll\": 1.314636033558408, \"pitch\": 0.13013602194123536, \"yaw\": 1.306629182890277}"}

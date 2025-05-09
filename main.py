@@ -45,7 +45,7 @@ def run_binarization(experiment : bool = False):
     env_for_binarization = environ.copy()
     env_for_binarization["paths"] = list_reconstruction_paths()
     env_for_binarization["prefix"] = config.RECONSTRUCTION_PATH.as_posix()
-    env_for_binarization["algorithms"] = json.dumps(["beta_niblack_3d", "niblack_3d", "otsu", "brute"])
+    env_for_binarization["algorithms"] = json.dumps(config.ALGORITHMS)
     env_for_binarization["USERPROFILE"] = getcwd()
     env_for_binarization["experiment"] = str(experiment)  
     return subprocess.run(

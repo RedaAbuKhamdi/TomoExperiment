@@ -58,11 +58,7 @@ class Gaussian:
 
     def rotate(self, volume: np.ndarray) -> np.ndarray:
         """Rotate the 3D mask by a random principal axis rotation."""
-        R = random.choice([
-            transformations.Direction.YAW(self.theta),
-            transformations.Direction.PITCH(self.theta),
-            transformations.Direction.ROLL(self.theta)
-        ])
+        R, rotation = transformations.choose_random_rotate(self.theta)
         R_inv = np.linalg.inv(R)
         return affine_transform(
             volume,
@@ -71,7 +67,7 @@ class Gaussian:
             order=0,
             mode='constant',
             cval=0
-        )
+        ), rotation
 
     def paint_volume(self, volume: np.ndarray):
         D, H, W = volume.shape
@@ -104,8 +100,9 @@ class Gaussian:
                     img[z_lo:z_hi, y, x] = 1
 
         # 2) Rotate and scatter into the main volume
-        rotated = self.rotate(img)
+        rotated, rotation = self.rotate(img)
         volume[rotated > 0] = 1
+        return rotation
 
 
 class SyntheticGaussianImage:
@@ -137,6 +134,9 @@ class SyntheticGaussianImage:
             z_limit=None,
             min_height=15
         )
-        gaussian2.paint_volume(image)
-        gaussian1.paint_volume(image)
-        return image
+        rotation2 = gaussian2.paint_volume(image)
+        rotation1 = gaussian1.paint_volume(image)
+        return image, {
+            "gaussian1": rotation1,
+            "gaussian2": rotation2
+        }

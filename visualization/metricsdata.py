@@ -74,7 +74,7 @@ class MetricsData:
                     self.datasets.append(dataset_config["name"])
         return self.datasets
     
-    def get_per_algorithm_data(self, evaluation_type : str):
+    def get_per_algorithm_data(self, evaluation_type : str = None):
         for algorithm in self.get_algorithms():
             algorithm_data = {
                 "datasets": [],
@@ -85,7 +85,15 @@ class MetricsData:
                     algorithm_data["datasets"].append(dataset_config["name"])
                     algorithm_data["metric_values"][dataset_config["name"]] = {}
                     for evaluation in dataset_config["evaluations"]:
-                        if evaluation["type"] == evaluation_type:
+                        if evaluation_type is None:
+                            evaluation_data = pd.read_csv(evaluation["path"], header = 0, index_col= 0)
+                            if "angles" not in algorithm_data.keys():
+                                algorithm_data["angles"] = evaluation_data.index.to_numpy()
+                            for metric in evaluation_data:
+                                if metric not in algorithm_data["metric_values"][dataset_config["name"]].keys():
+                                    algorithm_data["metric_values"][dataset_config["name"]][metric] = {}
+                                algorithm_data["metric_values"][dataset_config["name"]][metric][evaluation["type"]] = evaluation_data[metric].to_numpy()
+                        elif evaluation["type"] == evaluation_type:
                             evaluation_data = pd.read_csv(evaluation["path"], header = 0, index_col= 0)
                             if "angles" not in algorithm_data.keys():
                                 algorithm_data["angles"] = evaluation_data.index.to_numpy()
@@ -93,3 +101,46 @@ class MetricsData:
                                 algorithm_data["metric_values"][dataset_config["name"]][metric] = evaluation_data[metric].to_numpy()
             yield algorithm, algorithm_data
     
+    def get_threshold_data(self, threshold : float, algorithm : str, metric : str):
+        for algorithm, data in self.get_per_algorithm_data():
+            if algorithm == algorithm:
+                mean_angle = 0
+                mean_gt_metric = 0
+                amount = 0
+                angles_added = []
+                for dataset in data["datasets"]:
+                    angles = data["angles"]
+                    if metric not in data["metric_values"][dataset].keys():
+                        raise Exception("Metric {} not found".format(metric))
+                    neighbor_metrics = data["metric_values"][dataset][metric]["Neighbor metrics"]
+                    gt_metrics = data["metric_values"][dataset][metric]["Ground truth metrics"]
+                    for i in range(neighbor_metrics.shape[0]):
+                        if neighbor_metrics[i] > threshold:
+                            amount += 1
+                            mean_angle += angles[i + 1]
+                            angles_added.append("(" + str(angles[i + 1]) + " " + dataset + ")")
+                            mean_gt_metric += gt_metrics[i]
+                            break
+                # print("angles pre normalization {}, thresh = {}".format(mean_angle, threshold))
+                # print("angles added {}".format(" ".join(angles_added)))
+                if amount > 0:
+                    mean_angle /= amount
+                    mean_gt_metric /= amount
+                return mean_angle, mean_gt_metric
+        raise Exception("Algorithm {} not found".format(algorithm))
+    
+    def get_threshold_data_per_dataset(self, threshold : float, algorithm : str, metric : str, target_dataset : str):
+        for algorithm, data in self.get_per_algorithm_data():
+            if algorithm == algorithm:
+                for dataset in data["datasets"]:
+                    angles = data["angles"]
+                    if metric not in data["metric_values"][dataset].keys():
+                        raise Exception("Metric {} not found".format(metric))
+                    if dataset == target_dataset:
+                        neighbor_metrics = data["metric_values"][dataset][metric]["Neighbor metrics"]
+                        gt_metrics = data["metric_values"][dataset][metric]["Ground truth metrics"]
+                        for i in range(angles.shape[0]):
+                            if neighbor_metrics[i] > threshold:
+                                return angles[i], gt_metrics[i]
+        raise Exception("Algorithm {} not found".format(algorithm))
+

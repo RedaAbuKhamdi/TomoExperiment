@@ -23,7 +23,6 @@ class Data:
         self.parse_settings(image_paths.pop(settings_matches[0]))
         self.n = len(image_paths)
         image_paths.sort(key=natural_sort_key)
-        self.volumetric = self.n > 1
         self._create_image_with_geometry(image_paths)
 
     def parse_settings(self, path):
@@ -38,35 +37,27 @@ class Data:
         image = [None] * self.n
         for i in range(self.n):
             image[i] = np.asarray(Image.open(image_paths[i]))
+            image[i] = image[i] / 255
         
-        image = np.array(image) if self.volumetric else image[0]
-        data_geometry = astra.create_vol_geom((image.shape[2], image.shape[1], image.shape[0])) if self.volumetric else  astra.create_vol_geom(image.shape[1], image.shape[0])
-       
-        if self.volumetric:
-            self.data_id = astra.data3d.create("-vol", data_geometry, data = image)
-        else: 
-            self.data_id = astra.data2d.create("-vol", data_geometry, data = image)
+        image = np.array(image)
+        data_geometry = astra.create_vol_geom((image.shape[2], image.shape[1], image.shape[0]))
+        self.data_id = astra.data3d.create("-vol", data_geometry, data = image)
     
         self.sinogram_id = None
         self.data_geometry = data_geometry
 
     def calculate_sinogram(self, projector, projection_geometry): 
-        image = astra.data3d.get(self.data_id) if self.volumetric else astra.data2d.get(self.data_id)
-        if self.volumetric:
-            self.data_id = astra.data3d.create("-vol", self.data_geometry, data = image)
-            self.sinogram_id = astra.create_sino3d_gpu(self.data_id, projection_geometry, self.data_geometry, returnData = False)
-        else: 
-            self.data_id = astra.data2d.create("-vol", self.data_geometry, data = image)
-            self.sinogram_id = astra.create_sino(image, projector, returnData = False)
+        image = astra.data3d.get(self.data_id)
+        self.data_id = astra.data3d.create("-vol", self.data_geometry, data = image)
+        self.sinogram_id = astra.create_sino3d_gpu(self.data_id, projection_geometry, self.data_geometry, returnData = False)
+        phantom = astra.data3d.get(self.sinogram_id)
+        phantom = phantom + np.random.normal(0, 0.05)
+        astra.data3d.store(self.sinogram_id, phantom)
         return self.sinogram_id
     def __del__(self):
         try:
-            if self.volumetric:
-                astra.data3d.delete(self.data_id)
-                astra.data3d.delete(self.sinogram_id)
-            else:
-                astra.data2d.delete(self.data_id)
-                astra.data2d.delete(self.sinogram_id)
+            astra.data3d.delete(self.data_id)
+            astra.data3d.delete(self.sinogram_id)
         except:
             print("Dataset {} did not need reconstruction".format(self.settings["name"]))
     def get_volume_geometry(self):

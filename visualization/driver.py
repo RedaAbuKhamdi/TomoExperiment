@@ -9,6 +9,7 @@ from os import environ, listdir, makedirs, path
 from matplotlib import pyplot as plt
 
 from metricsdata import MetricsData
+from tqdm import tqdm
 
 from matplotlib import colors as mcolors
 import random
@@ -92,7 +93,29 @@ def scatter_plots_per_dataset(algorithm_data: dict, algorithm : str, colors : li
         makedirs(folder, exist_ok=True)
         plt.savefig("{0}/{1}_scatter_plot.png".format(folder, dataset))
 
-def scatter_plots_mean(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
+def scatter_plots_per_dataset_ground_truth(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
+    datasets = algorithm_data["datasets"]
+    angles = algorithm_data["angles"]
+    metric_values = algorithm_data["metric_values"]
+    metrics = metric_values[datasets[0]].keys()
+
+    x = np.arange(len(angles))  
+    for dataset in datasets:
+        plt.clf()
+        for metric in metric_values[dataset].keys():
+            values = delta_from_values(metric_values[dataset][metric]) if delta else metric_values[dataset][metric]
+            plt.scatter(angles.astype(str), values, label=f"{dataset} - {metric}")
+
+        plt.title("Metric values by angle for image {}".format(dataset))
+        plt.xlabel("Number of Angles")
+        plt.ylabel("Metric Value")
+        plt.tight_layout()
+        plt.legend()
+        folder = config.VISUALIZATION_PATH / "threshold" / algorithm / "per_dataset"
+        makedirs(folder, exist_ok=True)
+        plt.savefig("{0}/{1}_scatter_plot.png".format(folder, dataset))
+
+def scatter_plots_mean_ground_truth(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
     datasets = algorithm_data["datasets"]
     angles = algorithm_data["angles"]
     metric_values = algorithm_data["metric_values"]
@@ -116,9 +139,9 @@ def scatter_plots_mean(algorithm_data: dict, algorithm : str, colors : list, del
         plt.ylabel("Metric Value")
         plt.tight_layout()
         plt.legend()
-        folder = config.VISUALIZATION_PATH / algorithm
+        folder = config.VISUALIZATION_PATH / "threshold" / algorithm 
         makedirs(folder, exist_ok=True)
-        plt.savefig("{0}/{1}_scatter_plot{2}.png".format(folder, metric_name ,"_delta" if delta else ""))
+        plt.savefig("{0}/{1}_scatter_plot_mean.png".format(folder, metric_name))
 
 if __name__ == "__main__":
     print("Start visualization")
@@ -129,7 +152,30 @@ if __name__ == "__main__":
         print("Processing algorithm {}".format(algorithm))
         scatter_plots(data, algorithm, colors)
         scatter_plots_per_dataset(data, algorithm, colors)
-    neighbor_data = metrics_data.get_per_algorithm_data("Neighbor metrics")
-    ground_truth_data = metrics_data.get_per_algorithm_data("Ground truth metrics")
     
-            
+    for algorithm in metrics_data.get_algorithms():
+        print("Processing algorithm {} - thresholds".format(algorithm))
+        thresholds = np.arange(0, 1, 0.01)
+        for metric in ["iou", "boundarydice"]:
+            angles = []
+            metrics = []
+            for threshold in tqdm(thresholds):
+                angle, metric_value = metrics_data.get_threshold_data(threshold, algorithm, metric)
+                angles.append(angle)
+                metrics.append(metric_value)
+            angles = np.array(angles)
+            metrics = np.array(metrics) 
+            plt.clf()
+            plt.scatter(angles, metrics, label = "Threshold")
+            plt.title("Mean {} values by angle for each threshold".format(metric))
+            plt.xlabel("angles")
+            plt.ylabel("Metric Value")
+            plt.tight_layout()
+            plt.legend()
+            folder = config.VISUALIZATION_PATH / "threshold" / algorithm
+            makedirs(folder, exist_ok=True)
+            plt.savefig("{0}/{1}_threshold.png".format(folder, metric))
+        for algorithm, data in metrics_data.get_per_algorithm_data("Ground truth metrics"):
+            print("Processing algorithm {}".format(algorithm))
+            scatter_plots_per_dataset_ground_truth(data, algorithm, colors)
+            scatter_plots_mean_ground_truth(data, algorithm, colors)

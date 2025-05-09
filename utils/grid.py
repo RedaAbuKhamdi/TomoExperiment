@@ -13,9 +13,18 @@ class Grid3DGenerator:
         y = np.arange(H)[None, :, None]
         x = np.arange(W)[None, None, :]
 
+        parameters = {}
+
         if random_angle:
             # 1) build a single random rotation R
             a, b, c = np.random.uniform(0, np.pi/2, size=3)
+
+            parameters = {
+                "roll": c,
+                "pitch": a,
+                "yaw": b
+            }
+
             R = (
                 transformations.Direction.ROLL(c) @
                 transformations.Direction.YAW(b) @
@@ -48,4 +57,4 @@ class Grid3DGenerator:
             mask_x = (x % spacing) < thickness
             grid = (mask_z | mask_y | mask_x).astype(np.uint8)
 
-        return grid
+        return grid, parameters

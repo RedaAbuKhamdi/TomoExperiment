@@ -1,5 +1,5 @@
 import numpy as np
-import cupy as cp
+import random
 import enum
 
 class Direction(enum.Enum):
@@ -18,6 +18,19 @@ class Direction(enum.Enum):
         [0, np.cos(angle), -np.sin(angle)], 
         [0, np.sin(angle), np.cos(angle)]
         ])
+
+def choose_random_rotate(angle : float):
+    choice = random.randint(0, 2)
+    result = None
+    if choice == 0:
+        result = (Direction.PITCH(angle), "pitch")
+    elif choice == 1:
+        result = (Direction.YAW(angle), "yaw")
+    else:
+        result = (Direction.ROLL(angle), "roll")
+    return result
+
+    
 
 
 def rotate_3d(volume: np.ndarray, direction: np.ndarray) -> np.ndarray:

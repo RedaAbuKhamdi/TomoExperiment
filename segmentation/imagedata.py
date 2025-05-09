@@ -66,15 +66,4 @@ class ImageData(ImageDataBase):
                 return json.loads(f.read())
         else:
             return None
-    def get_e_sd(self, window : int):
-        path = self.path
-        print("window {0}".format(window))
-        if os.path.isfile("{0}/means_{1}.npy".format(path, window)) and os.path.isfile("{0}/stds_{1}.npy".format(path, window)):
-            return np.load("{0}/means_{1}.npy".format(path, window)), np.load("{0}/stds_{1}.npy".format(path, window)) 
-        means, stds = sliding_window_mean_std(cp.asarray(self.image), (window, window, window))
-        means = cp.asnumpy(means)
-        stds = cp.asnumpy(stds)
-        np.save("{0}/means_{1}.npy".format(path, window), means, False)
-        np.save("{0}/stds_{1}.npy".format(path, window), stds, False)
-        return means, stds
     

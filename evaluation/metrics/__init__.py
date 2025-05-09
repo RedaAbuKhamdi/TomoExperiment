@@ -1,5 +1,6 @@
 __all__ = [
     "iou",
     "boundarydice",
-    "normalizedhausdorff"
+    "normalizedhausdorff",
+    "mse"
 ]

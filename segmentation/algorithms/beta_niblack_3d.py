@@ -122,12 +122,14 @@ def parameters_experiment(imageData: ImageData):
     # 3) Parameter grids
     shape   = imageData.image.shape
     ks      = np.linspace(-2,  2, 60, dtype=np.float32)
-    max_w   = max(1, min(2 * min(shape)//3, 250))
+    max_w   = max(1, min(2 * min(shape)))
     windows = np.arange(10, max_w,
                         max(1, (max_w - 10)//15),
                         dtype=np.int16)
 
     rows = []  # will collect dicts for Pandas
+
+    print(cp.min(img_gpu).item(), cp.max(img_gpu).item())
 
     # 4) Sweep over (window, k, beta)
     for window in tqdm.tqdm(windows, desc="Window", total=windows.size):

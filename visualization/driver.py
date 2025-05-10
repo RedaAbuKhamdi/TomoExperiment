@@ -5,6 +5,7 @@ from os import environ, listdir, makedirs, path
 from matplotlib import pyplot as plt
 
 from metricsdata import MetricsData
+import matplotlib.ticker as mticker
 from tqdm import tqdm
 
 from matplotlib import colors as mcolors
@@ -67,50 +68,52 @@ def scatter_plots(algorithm_data: dict, algorithm : str, colors : list):
         makedirs(folder, exist_ok=True)
         plt.savefig("{0}/{1}_scatter_plot_neighbor.png".format(folder, metric_name))
 
-def scatter_plots_per_dataset(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
-    datasets = algorithm_data["datasets"]
-    angles = algorithm_data["angles"]
+def scatter_plots_per_dataset(algorithm_data: dict,
+                              algorithm: str,
+                              ground_truth : bool = False):
+    datasets      = algorithm_data["datasets"]
+    angles        = algorithm_data["angles"].astype(int)
     metric_values = algorithm_data["metric_values"]
-    metrics = metric_values[datasets[0]].keys()
-
-    x = np.arange(len(angles))  
     for dataset in datasets:
-        plt.clf()
-        for metric in metric_values[dataset].keys():
-            values = delta_from_values(metric_values[dataset][metric]) if delta else metric_values[dataset][metric]
-            plt.scatter(angles.astype(str), values, label=f"{dataset} - {metric}")
+        # figure setup
+        fig, ax = plt.subplots(figsize=(8,5), dpi=120)
 
-        plt.title("Metric values by angle for image {}".format(dataset))
-        plt.xlabel("Number of Angles")
-        plt.ylabel("Metric Value")
+        # determine which metrics we're plotting
+        metrics = list(metric_values[dataset].keys())
+        cmap    = plt.get_cmap('tab10')
+        metric_colors = {m: cmap(i) for i, m in enumerate(metrics)}
+
+        # draw each metric as a line + marker
+        for metric in metrics:
+            y = metric_values[dataset][metric]
+
+            ax.plot(angles, y,
+                    marker='o',
+                    linestyle='-',
+                    color=metric_colors[metric],
+                    label=metric.upper())
+
+        # log-2 x-axis so 8→16→32→… are evenly spaced
+        ax.set_xscale('log', base=2)
+        ax.set_xticks(angles)
+        ax.get_xaxis().set_major_formatter(mticker.ScalarFormatter())
+
+        # grid, labels, legend
+        ax.grid(axis='y', linestyle='--', alpha=0.5)
+        ax.set_ylim(0, 1.02)
+        ax.set_xlabel("Number of Angles", fontsize=12)
+        ax.set_ylabel("Metric Value", fontsize=12)
+        ax.set_title(f"{dataset}: Metric vs. Angle {"Neighbor" if not ground_truth else "Ground Truth"}", fontsize=14)
+        ax.legend(title="", loc='lower right')
+
         plt.tight_layout()
-        plt.legend()
+
+        # save
         folder = config.VISUALIZATION_PATH / algorithm / "per_dataset"
-        makedirs(folder, exist_ok=True)
-        plt.savefig("{0}/{1}_scatter_plot.png".format(folder, dataset))
-
-def scatter_plots_per_dataset_ground_truth(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
-    datasets = algorithm_data["datasets"]
-    angles = algorithm_data["angles"]
-    metric_values = algorithm_data["metric_values"]
-    metrics = metric_values[datasets[0]].keys()
-
-    x = np.arange(len(angles))  
-    for dataset in datasets:
-        plt.clf()
-        for metric in metric_values[dataset].keys():
-            values = delta_from_values(metric_values[dataset][metric]) if delta else metric_values[dataset][metric]
-            plt.scatter(angles.astype(str), values, label=f"{dataset} - {metric}")
-
-        plt.title("Metric values by angle for image {}".format(dataset))
-        plt.xlabel("Number of Angles")
-        plt.ylabel("Metric Value")
-        plt.tight_layout()
-        plt.legend()
-        folder = config.VISUALIZATION_PATH / "threshold" / algorithm / "per_dataset"
-        makedirs(folder, exist_ok=True)
-        plt.savefig("{0}/{1}_scatter_plot.png".format(folder, dataset))
-
+        folder.mkdir(parents=True, exist_ok=True)
+        out_path = folder / f"{dataset}_{"neighbor" if not ground_truth else "ground_truth"}_metrics.png"
+        plt.savefig(out_path)
+        plt.close(fig)
 def scatter_plots_mean_ground_truth(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
     datasets = algorithm_data["datasets"]
     angles = algorithm_data["angles"]
@@ -147,7 +150,10 @@ if __name__ == "__main__":
     for algorithm, data in metrics_data.get_per_algorithm_data("Neighbor metrics"):
         print("Processing algorithm {}".format(algorithm))
         scatter_plots(data, algorithm, colors)
-        scatter_plots_per_dataset(data, algorithm, colors)
+        scatter_plots_per_dataset(data, algorithm)
+    for algorithm, data in metrics_data.get_per_algorithm_data("Ground truth metrics"):
+        print("Processing algorithm {}".format(algorithm))
+        scatter_plots_per_dataset(data, algorithm, True)
     
     for algorithm in metrics_data.get_algorithms():
         print("Processing algorithm {} - thresholds".format(algorithm))
@@ -180,6 +186,3 @@ if __name__ == "__main__":
             folder = config.VISUALIZATION_PATH / "threshold" / algorithm
             makedirs(folder, exist_ok=True)
             plt.savefig("{0}/{1}_threshold.png".format(folder, metric))
-        for algorithm, data in metrics_data.get_per_algorithm_data("Ground truth metrics"):
-            print("Processing algorithm {}".format(algorithm))
-            scatter_plots_per_dataset_ground_truth(data, algorithm, colors)

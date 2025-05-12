@@ -35,39 +35,7 @@ def run_segmentation(data_paths, used_algorithms):
                     parameters[data.settings["name"]][algorithm] = params
                 data.save_result(segmented, params, algorithm)
 
-def run_parameters_experiments(data_paths, used_algorithms):
-    # folder = config.EXPERIMENTS_PARAMETERS_PATH / "beta_niblack_3d"
-    # for path in tqdm.tqdm(folder.iterdir()):
-    #     results = pd.read_csv(path / "results.csv")
-    #     for w in sorted(results['window'].unique()):
-    #         sub = results[results['window'] == w]
-    #         # pivot so rows=beta, cols=k, values=jaccard
-    #         pivot = sub.pivot(index='beta', columns='k', values='jaccard')
-    #         plt.clf()
-    #         plt.figure(figsize=(6,5))
-    #         sns.heatmap(pivot, 
-    #                     cmap='viridis',      # or any cmap you like
-    #                     cbar_kws={'label':'Jaccard'}, 
-    #                     xticklabels=5,       # show every 5th tick for readability
-    #                     yticklabels=5)
-    #         plt.title(f'Window = {w}, dataset = {path.name}')
-    #         plt.xlabel('q (k)')
-    #         plt.ylabel('beta')
-    #         plt.tight_layout()
-    #         makedirs(config.EXPERIMENTS_PARAMETERS_PATH / "plots" / path.name, exist_ok=True)
-    #         plt.savefig(config.EXPERIMENTS_PARAMETERS_PATH / "plots" / path.name / f'heatmap_w{w}.png')
-    for data_path in reversed(data_paths):
-        if "8" in data_path.split("/")[-1]:
-            print(data_path)
-            data = ImageData(data_path)
-            print("Processing {0}".format(data.settings["name"]))
-            importlib.import_module("algorithms.{}".format("suavola_3d")).parameters_experiment(data)
-
-
 data_paths = sorted(json.loads(environ["paths"]), key=natural_sort_key)
 used_algorithms = set(json.loads(environ["algorithms"]))
 experiment = environ["experiment"] == "True"
-if experiment:
-    run_parameters_experiments(data_paths, used_algorithms)
-else:
-    run_segmentation(data_paths, used_algorithms)
+run_segmentation(data_paths, used_algorithms)

@@ -7,4 +7,4 @@ SEGMENTATION_PATH = pathlib.Path(__file__).parent.resolve() / "results" / "binar
 RECONSTRUCTION_PATH = pathlib.Path(__file__).parent.resolve() / "results" / "reconstructions"
 EXPERIMENTS_PARAMETERS_PATH = pathlib.Path(__file__).parent.resolve() / "results" / "parameters"
 
-ALGORITHMS = ["beta_niblack_3d", "otsu", "brute"]
+ALGORITHMS = ["beta_niblack_3d"]

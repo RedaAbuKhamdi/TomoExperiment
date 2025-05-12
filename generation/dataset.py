@@ -37,7 +37,9 @@ class Data:
         image = [None] * self.n
         for i in range(self.n):
             image[i] = np.asarray(Image.open(image_paths[i]))
-            image[i] = image[i] / 255
+            factor = np.max(image[i])
+            factor = factor if factor != 0 else 1
+            image[i] = image[i] / factor
         
         image = np.array(image)
         data_geometry = astra.create_vol_geom((image.shape[2], image.shape[1], image.shape[0]))
@@ -50,9 +52,6 @@ class Data:
         image = astra.data3d.get(self.data_id)
         self.data_id = astra.data3d.create("-vol", self.data_geometry, data = image)
         self.sinogram_id = astra.create_sino3d_gpu(self.data_id, projection_geometry, self.data_geometry, returnData = False)
-        phantom = astra.data3d.get(self.sinogram_id)
-        phantom = phantom + np.random.normal(0, 0.15)
-        astra.data3d.store(self.sinogram_id, phantom)
         return self.sinogram_id
     def __del__(self):
         try:
@@ -62,13 +61,14 @@ class Data:
             print("Dataset {} did not need reconstruction".format(self.settings["name"]))
     def get_volume_geometry(self):
         return self.data_geometry
-    def save_settings(self, path : str, angles : np.ndarray, strategy : str, step : str):
+    def save_settings(self, path : str, angles : np.ndarray, strategy : str, step : str, noise : float):
         new_settings = {
             "angles": {
                 "step": step,
                 "strategy": strategy,
                 "values": angles.tolist()
-            }
+            },
+            "noise_std": noise
         }
         for key in SAVE_SETTINGS_KEYWORDS:
             if key in self.settings:

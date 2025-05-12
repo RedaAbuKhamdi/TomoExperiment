@@ -43,30 +43,45 @@ def delta_from_values(values : np.ndarray) -> np.ndarray:
     for i in range(result.shape[0] - 1):
         result[i] = values[i+1] - values[i]
     return result
-def scatter_plots(algorithm_data: dict, algorithm : str, colors : list):
-    datasets = algorithm_data["datasets"]
-    angles = algorithm_data["angles"]
+def scatter_plots(algorithm_data: dict, algorithm: str, colors: dict):
+    """
+    For each metric (iou, boundarydice, mse, …), plot a curve
+    of metric vs. #angles, one line per dataset.
+    """
+    datasets      = algorithm_data["datasets"]
+    angles        = algorithm_data["angles"].astype(int)
     metric_values = algorithm_data["metric_values"]
-    metrics = metric_values[datasets[0]].keys()
+    metrics       = list(metric_values[datasets[0]].keys())
+
+    out_dir = config.VISUALIZATION_PATH / algorithm
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     for metric_name in metrics:
-        plt.clf()
-        for i, dataset in enumerate(datasets):
-            for j, metric in enumerate(metric_values[dataset].keys()):
-                if metric != metric_name:
-                    continue
-                values = metric_values[dataset][metric_name]
-                plt.scatter(angles.astype(str), values, color=colors[dataset], label=f"{dataset} - {metric}", s = 16)
+        fig, ax = plt.subplots(figsize=(8,5), dpi=120)
 
-        plt.title("{} metric values by angle for each image".format(metric_name))
-        plt.xlabel("Number of Angles")
-        plt.ylabel("Metric Value")
-        plt.ylim(0, 1)
+        for dataset in datasets:
+            y = metric_values[dataset][metric_name]
+            ax.plot(angles, y,
+                    marker='o', linestyle='-',
+                    color=colors[dataset],
+                    label=dataset)
+
+        ax.set_xscale('log', base=2)
+        ax.set_xticks(angles)
+        ax.get_xaxis().set_major_formatter(mticker.ScalarFormatter())
+        ax.tick_params(axis='x', rotation=45)
+
+        ax.grid(which='major', axis='y', linestyle='--', alpha=0.5)
+        ax.set_ylim(0, 1.02)
+        ax.set_xlabel("Number of Angles", fontsize=12)
+        ax.set_ylabel(metric_name.capitalize(),     fontsize=12)
+        ax.set_title(f"{metric_name.capitalize()} vs. Angle", fontsize=14)
+
+        ax.legend(title="Dataset", loc='upper left', bbox_to_anchor=(1.02,1), borderaxespad=0)
+
         plt.tight_layout()
-        plt.legend()
-        folder = config.VISUALIZATION_PATH / algorithm
-        makedirs(folder, exist_ok=True)
-        plt.savefig("{0}/{1}_scatter_plot_neighbor.png".format(folder, metric_name))
+        plt.savefig(out_dir / f"{metric_name}_curve.png", bbox_inches='tight')
+        plt.close(fig)
 
 def scatter_plots_per_dataset(algorithm_data: dict,
                               algorithm: str,
@@ -114,7 +129,7 @@ def scatter_plots_per_dataset(algorithm_data: dict,
         out_path = folder / f"{dataset}_{"neighbor" if not ground_truth else "ground_truth"}_metrics.png"
         plt.savefig(out_path)
         plt.close(fig)
-def scatter_plots_mean_ground_truth(algorithm_data: dict, algorithm : str, colors : list, delta : bool = False):
+def scatter_plots_mean_ground_truth(algorithm_data: dict, algorithm : str, colors : list):
     datasets = algorithm_data["datasets"]
     angles = algorithm_data["angles"]
     metric_values = algorithm_data["metric_values"]
@@ -125,7 +140,7 @@ def scatter_plots_mean_ground_truth(algorithm_data: dict, algorithm : str, color
         plt.clf()
         values = np.zeros(angles.shape)
         for i, dataset in enumerate(datasets):
-            values += delta_from_values(metric_values[dataset][metric_name]) if delta else metric_values[dataset][metric_name]
+            values += metric_values[dataset][metric_name]
         values /= len(datasets)
         plt.scatter(angles.astype(str), values, color=colors[dataset])
 

@@ -18,8 +18,3 @@ def segment(imageData : ImageData, params : dict = None):
         "threshold" : float(threshold)
     }
     return best_image, params
-
-def parameters_experiment(imageData : ImageData):
-    return {
-        "title" : []
-        }

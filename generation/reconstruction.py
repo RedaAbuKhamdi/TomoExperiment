@@ -30,6 +30,12 @@ class Reconstruction:
                                         det_count["columns"], 
                                         angles)
         sinogram_id = self.data.calculate_sinogram(None, proj_geom)
+        
+        phantom = astra.data3d.get(sinogram_id)
+        self.noise = np.random.uniform(0.1, 0.5)
+        phantom = phantom + np.random.normal(0, self.noise)
+        astra.data3d.store(sinogram_id, phantom)
+
         self.sinogram = sinogram_id
         return sinogram_id
 
@@ -55,7 +61,7 @@ class Reconstruction:
         folder = Reconstruction.get_folder_name(self.data.settings['name'], experiment_number, strategy)
         os.makedirs(folder, exist_ok=True)
         io.imsave("{0}/reconstruction_experiment.tiff".format(folder),  reconstruction)
-        self.data.save_settings(folder, angles, strategy, step)
+        self.data.save_settings(folder, angles, strategy, step, self.noise)
     
     def clean_up(self):
         if self.rec_id is not None:

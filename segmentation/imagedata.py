@@ -58,6 +58,8 @@ class ImageData(ImageDataBase):
         with open(settings_path, "r") as f:
             self.settings = json.loads(f.read())
             self.settings["name"] = self.path.split("/")[-2]
+    def get_noise_std(self):
+        return self.settings["noise_std"] if "noise_std" in self.settings.keys() else 0
 
     def check_if_done(self, algorithm : str):
         folder = self.get_folder(algorithm)

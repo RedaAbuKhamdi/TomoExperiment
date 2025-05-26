@@ -102,8 +102,8 @@ class MetricsData:
             yield algorithm, algorithm_data
 
     def get_mean_ground_truth(self, algorithm : str, metric : str):
-        for algorithm, data in self.get_per_algorithm_data():
-            if algorithm == algorithm:
+        for algorithm_iter, data in self.get_per_algorithm_data():
+            if algorithm_iter == algorithm:
                 angles = data["angles"]
                 mean_gt_metric = np.zeros_like(angles, dtype=np.float64)
                 amount = 0
@@ -118,8 +118,8 @@ class MetricsData:
         raise Exception("Algorithm {} not found".format(algorithm))
     
     def get_threshold_data(self, threshold : float, algorithm : str, metric : str):
-        for algorithm, data in self.get_per_algorithm_data():
-            if algorithm == algorithm:
+        for algorithm_iter, data in self.get_per_algorithm_data():
+            if algorithm_iter == algorithm:
                 mean_angle = 0
                 mean_gt_metric = 0
                 amount = 0

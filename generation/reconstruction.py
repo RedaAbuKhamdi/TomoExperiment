@@ -6,6 +6,62 @@ import numpy as np
 
 from dataset import Data
 from skimage import io
+import cupyx.scipy.ndimage as cpndi
+import cupy as cp
+
+def add_shading_and_noise_in_chunks(sino_id, sino_shape, noise_std, shade_frac=0.3, chunk_size=32):
+        """
+        Reads your full sinogram from ASTRA, processes it in GPU‐backed chunks of `chunk_size` slices,
+        then writes the final result back to ASTRA in one go.
+        """
+        D, H, W = sino_shape
+
+        # 1) pull the entire sinogram into host RAM
+        sino = astra.data3d.get(sino_id).astype(np.float32)
+
+        # 2) compute its range once
+        sino_min, sino_max = sino.min(), sino.max()
+        sino_range = float(sino_max - sino_min)
+        shading_amp = shade_frac * sino_range
+        sigma_y, sigma_x = H/4, W/4
+
+        # 3) process chunk by chunk
+        for start in range(0, D, chunk_size):
+            stop = min(start + chunk_size, D)
+            sz = stop - start
+
+            # move just this slab to GPU
+            sino_gpu = cp.array(sino[start:stop], dtype=cp.float32)
+
+            # a) low‐freq shading
+            rnd = cp.random.random((sz, H, W), dtype=cp.float32)
+            smooth = cpndi.gaussian_filter(rnd,
+                                        sigma=(0, sigma_y, sigma_x),
+                                        mode='reflect')
+            # per‐slice normalize to [0,1]
+            mn = smooth.min(axis=(1,2), keepdims=True)
+            mx = smooth.max(axis=(1,2), keepdims=True)
+            smooth = (smooth - mn) / (mx - mn + 1e-8)
+            bias = smooth * shading_amp
+
+            # b) fine noise
+            noise = cp.random.normal(0, noise_std * sino_range,
+                                    size=(sz, H, W), dtype=cp.float32)
+
+            # combine
+            sino_gpu += bias
+            sino_gpu += noise
+
+            # copy that chunk back to host array
+            sino[start:stop] = cp.asnumpy(sino_gpu)
+
+            # free GPU memory immediately
+            del sino_gpu, rnd, smooth, bias, noise
+            cp._default_memory_pool.free_all_blocks()
+
+        # 4) write full updated sinogram back into ASTRA
+        astra.data3d.store(sino_id, sino)
+        return
 
 class Reconstruction:
     def __init__(self, data : Data):
@@ -14,30 +70,42 @@ class Reconstruction:
         self.reconstruction = None
         self.algorithm_id = None
         self.sinogram = None
-    
     def calculate_projection(
             self,
-            det_spacing, 
+            det_spacing,
             det_count,
             angles
     ):
-        if (self.sinogram is not None):
-            raise "Only one run is allowed per object. Create a new Reconstruction object"
-        proj_geom = astra.create_proj_geom('parallel3d', 
-                                        det_spacing["x"], 
-                                        det_spacing["y"], 
-                                        det_count["rows"], 
-                                        det_count["columns"], 
-                                        angles)
-        sinogram_id = self.data.calculate_sinogram(None, proj_geom)
-        
-        phantom = astra.data3d.get(sinogram_id)
-        self.noise = np.random.uniform(0.1, 0.5)
-        phantom = phantom + np.random.normal(0, self.noise)
-        astra.data3d.store(sinogram_id, phantom)
+        if self.sinogram is not None:
+            raise RuntimeError("Only one run is allowed per object. Create a new Reconstruction object")
 
-        self.sinogram = sinogram_id
-        return sinogram_id
+        # 1) build geometry & forward project (on GPU)
+        proj_geom = astra.create_proj_geom(
+            'parallel3d',
+            det_spacing["x"],
+            det_spacing["y"],
+            det_count["rows"],
+            det_count["columns"],
+            angles
+        )
+        sino_id = self.data.calculate_sinogram(None, proj_geom)
+        sino_shape = astra.data3d.get(sino_id).shape
+
+        # compute absolute noise‐std (as before)
+        print("Start")
+        noise_level, shading_level = self.data.get_noise_level()
+
+        if shading_level > 0 or noise_level > 0:
+            # do chunked GPU shading+noise
+            add_shading_and_noise_in_chunks(sino_id,
+                                            sino_shape,
+                                            noise_level,
+                                            shading_level,
+                                            chunk_size=32)
+        
+        print("Finish")
+        self.noise = noise_level
+        self.sinogram = sino_id
 
     def reconstruct(self, iterations : int,  algorithm : str):
         if self.sinogram is None:

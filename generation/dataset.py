@@ -34,20 +34,37 @@ class Data:
             yield self.settings["experiments"][i]
 
     def _create_image_with_geometry(self, image_paths):
+        
         image = [None] * self.n
         for i in range(self.n):
-            image[i] = np.asarray(Image.open(image_paths[i]))
+            image[i] = np.asarray(Image.open(image_paths[i])).astype(np.float32)
             factor = np.max(image[i])
             factor = factor if factor != 0 else 1
             image[i] = image[i] / factor
         
         image = np.array(image)
-        data_geometry = astra.create_vol_geom((image.shape[2], image.shape[1], image.shape[0]))
+        data_geometry = astra.create_vol_geom(image.shape[2], image.shape[1], image.shape[0])
         self.data_id = astra.data3d.create("-vol", data_geometry, data = image)
     
         self.sinogram_id = None
         self.data_geometry = data_geometry
-
+    def get_noise_level(self):
+        noise_level = 0
+        shading_level = 0
+        if "noise" in self.settings.keys():
+            noise = self.settings["noise"]
+            result = 0
+            if noise["magnitude"] == "low":
+                result = 0.02
+            elif noise["magnitude"] == "medium":
+                result = 0.05
+            elif noise["magnitude"] == "high":
+                result = 0.1
+            if noise["type"] == "gaussian":
+                noise_level = result
+            elif noise["type"] == "shading":
+                shading_level = result
+        return noise_level, shading_level
     def calculate_sinogram(self, projector, projection_geometry): 
         image = astra.data3d.get(self.data_id)
         self.data_id = astra.data3d.create("-vol", self.data_geometry, data = image)

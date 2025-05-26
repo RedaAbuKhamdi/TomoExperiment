@@ -1,1 +1,1 @@
-{"name": "concrete2", "detector_spacing": {"x": 1, "y": 1}, "detector_count": {"rows": 600, "columns": 600}, "iterations": 100, "algorithm": "SIRT3D_CUDA"}
+{"name": "concrete2", "detector_spacing": {"x": 1, "y": 1}, "detector_count": {"rows": 512, "columns": 512}, "iterations": 100, "algorithm": "SIRT3D_CUDA"}

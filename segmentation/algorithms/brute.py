@@ -28,7 +28,7 @@ def segment(imageData: ImageData, params: dict = None):
     else:
         # full sweep of thresholds
         tmin, tmax = img_gpu.min().item(), img_gpu.max().item()
-        thresholds = np.linspace(tmin, tmax, 500, dtype=np.float32)
+        thresholds = np.linspace(tmin, tmax, 300, dtype=np.float32)
 
         for t in tqdm.tqdm(thresholds, desc="Threshold"):
             # 3) threshold on GPU

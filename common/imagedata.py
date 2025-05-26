@@ -50,6 +50,8 @@ class ImageDataBase:
     def get_data(self):
         segmentation = []
         ground_truth = []
+        print(self.settings["name"])
+        print(self.settings["name"])
         for index, gt in self.get_ground_truth_slices():
             segmentation.append(self.image[index])
             ground_truth.append(gt)

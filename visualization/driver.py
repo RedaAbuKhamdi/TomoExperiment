@@ -157,6 +157,60 @@ def scatter_plots_mean_ground_truth(algorithm_data: dict, algorithm : str, color
         makedirs(folder, exist_ok=True)
         plt.savefig("{0}/{1}_scatter_plot_mean.png".format(folder, metric_name))
 
+def superplot_metrics(algorithm_data: dict,
+                      algorithm: str,
+                      colors: dict,
+                      elbow_angle: int = None):
+    """
+    Draw two panels:
+      (a) Metric1 vs #angles, one curve per dataset
+      (b) Metric2 vs #angles, same curves & colors
+    Legend at bottom; log-2 x-axis; optional elbow_line.
+    """
+    datasets      = algorithm_data["datasets"]
+    angles        = algorithm_data["angles"].astype(int)
+    metric_values = algorithm_data["metric_values"]
+    metrics       = list(metric_values[datasets[0]].keys())[0:2]
+
+    # Prepare output folder
+    out_dir = config.VISUALIZATION_PATH / algorithm
+    makedirs(out_dir, exist_ok=True)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12,5), dpi=120, sharey=True)
+
+    for ax, metric_name in zip(axes, metrics):
+        for ds in datasets:
+            y = metric_values[ds][metric_name]
+            ax.plot(angles, y,
+                    marker='o', linestyle='-',
+                    color=colors[ds],
+                    label=ds)
+        ax.set_xscale('log', base=2)
+        ax.set_xticks(angles)
+        ax.get_xaxis().set_major_formatter(mticker.ScalarFormatter())
+        ax.tick_params(axis='x', rotation=45)
+        ax.grid(axis='y', linestyle='--', alpha=0.5)
+        ax.set_xlabel("Number of Angles", fontsize=12)
+        ax.set_title(f"{metric_name.capitalize()}", fontsize=14)
+    axes[0].set_ylabel("Metric Value", fontsize=12)
+    axes[0].set_ylim(0,1.02)
+
+    # optional “elbow” line
+    if elbow_angle is not None:
+        for ax in axes:
+            ax.axvline(elbow_angle, color='gray', linestyle='--', alpha=0.7)
+
+    # shared legend at bottom
+    fig.legend(datasets,
+               loc='lower center',
+               ncol=len(datasets),
+               frameon=False,
+               fontsize=10)
+
+    plt.tight_layout(rect=[0,0.12,1,1])
+    fig.savefig(out_dir / "summary_metrics.png", bbox_inches='tight')
+    plt.close(fig)
+
 if __name__ == "__main__":
     print("Start visualization")
     metrics_data = MetricsData()
@@ -169,6 +223,7 @@ if __name__ == "__main__":
     for algorithm, data in metrics_data.get_per_algorithm_data("Ground truth metrics"):
         print("Processing algorithm {}".format(algorithm))
         scatter_plots_per_dataset(data, algorithm, True)
+        superplot_metrics(data, algorithm, colors)
     
     for algorithm in metrics_data.get_algorithms():
         print("Processing algorithm {} - thresholds".format(algorithm))

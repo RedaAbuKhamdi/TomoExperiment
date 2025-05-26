@@ -14,7 +14,7 @@ sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 import config
 from imagedata import ImageData
 
-def thresholding_niblack_gpu(img_gpu: cp.ndarray,
+def thresholding_niblack_gpu(img_f: cp.ndarray,
                              q: float,
                              mean: cp.ndarray,
                              std: cp.ndarray,
@@ -24,14 +24,10 @@ def thresholding_niblack_gpu(img_gpu: cp.ndarray,
       seg = img >= (mean_local + q * std_local)
     entirely on the GPU.
     """
-    img_f = img_gpu.astype(cp.float32)
     return img_f >= (mean + std * q + beta)
 
 
-def calculate_mean_std_gpu(img_gpu: cp.ndarray, window: int) -> tuple:
-    # cast once
-    img_f = img_gpu.astype(cp.float32)
-
+def calculate_mean_std_gpu(img_f: cp.ndarray, window: int) -> tuple:
     # compute local mean of I and I^2, but only in-plane:
     # size = (1, window, window) → radius 0 in z, radius window//2 in y,x
     mean   = ndi_gpu.uniform_filter(img_f,
@@ -62,71 +58,74 @@ if not logger.handlers:
 
 def segment(imageData: ImageData, params: dict = None):
     """
-    If params given: do a single Niblack with (w, k, beta).
-    Otherwise: sweep (w in windows, k in ks), find best by mean‐Jaccard,
-    logging progress and bests as we go.
+    If params given: single Niblack with (w, k, beta).
+    Otherwise: sweep (w, k, beta) to maximize mean‐Jaccard.
     """
-    name = imageData.settings["name"]
-    img   = imageData.image
+    name    = imageData.settings["name"]
+    img     = imageData.image
     img_gpu = cp.asarray(img, dtype=cp.float32)
-    beta    = abs(imageData.get_noise_std())
-    logger.info("Segment called for '%s'; beta=%.4f", name, beta)
 
-    # quick single‐call case
+    # baseline beta = global std
+    beta0 = float(cp.std(img_gpu).item())
+    logger.info("Segment called for '%s'; baseline beta=%.4f", name, beta0)
+
+    # single-call mode
     if params:
-        w = params["w"]
-        k = params["k"]
-        mean, std = calculate_mean_std_gpu(img_gpu, w)
-        seg_gpu   = thresholding_niblack_gpu(img_gpu, k, mean, std, beta)
-        best_image = cp.asnumpy(seg_gpu)
-        return best_image, params
+        w = params["w"]; k = params["k"]; b = params["beta"]
+        mean, std   = calculate_mean_std_gpu(img_gpu, w)
+        seg_gpu     = thresholding_niblack_gpu(img_gpu, k, mean, std, b)
+        return cp.asnumpy(seg_gpu), params
 
-    # --- otherwise, do full sweep ---
-    logger.info("No params provided; running full sweep")
+    # --- full sweep mode ---
+    logger.info("No params provided; running full w×k×beta sweep")
 
-    # get GT slices once
-    gt_list = list(imageData.get_ground_truth_slices())
-    indices, gt_arrays = zip(*gt_list)
-    indices = np.array(indices, dtype=np.int64)
-    gt_stack_gpu = cp.stack([cp.asarray(gt, dtype=cp.bool_) for gt in gt_arrays], axis=0)
-    S = gt_stack_gpu.shape[0]
+    # 1) load GT once
+    gt_list       = list(imageData.get_ground_truth_slices())
+    indices, gts  = zip(*gt_list)
+    indices       = np.array(indices, dtype=np.int64)
+    gt_stack_gpu  = cp.stack([cp.asarray(g, dtype=cp.bool_) for g in gts], axis=0)
+    S             = gt_stack_gpu.shape[0]
     logger.info("Evaluating on %d ground-truth slices", S)
 
-    # define grid
-    windows = np.arange(20, 250, 20, dtype=int)      # e.g. 5,15,...,55
-    ks      = np.linspace(-0.5, 0.5, 50, dtype=float)
-    logger.info("Grid = %d windows × %d ks = %d runs",
-                windows.size, ks.size, windows.size*ks.size)
+    # 2) define parameter grids
+    windows = np.arange(5, 125, 20, dtype=int)      # e.g. [5,25,45,65,85,105]
+    ks      = np.linspace(-0.5, 0.5, 50, dtype=float)  # 100 values
+    betas   = np.linspace(0, cp.max(img_gpu).item(), 30, dtype=float)
+    total_runs = windows.size * ks.size * betas.size
+    logger.info("Grid size: %d windows × %d ks × %d betas = %d runs",
+                windows.size, ks.size, betas.size, total_runs)
 
-    # precompute mean/std per window
-    logger.info("Precomputing slice‐wise mean/std for each window…")
+    # 3) precompute mean/std for each window
     stats = {}
+    logger.info("Precomputing mean/std for each window…")
     for w in tqdm.tqdm(windows, desc="Precompute windows"):
         stats[w] = calculate_mean_std_gpu(img_gpu, w)
 
-    # sweep
+    # 4) sweep
     best_val    = -1.0
     best_params = {}
     best_image  = None
+    pbar = tqdm.tqdm(total=total_runs, desc="Sweeping", unit="run")
 
-    pbar = tqdm.tqdm(total=windows.size*ks.size, desc="Sweeping", unit="run")
     for w in windows:
         mean_gpu, std_gpu = stats[w]
         for k in ks:
-            seg_gpu     = thresholding_niblack_gpu(img_gpu, k, mean_gpu, std_gpu, beta)
-            seg_slices  = seg_gpu[indices]                   # (S,H,W)
-            I =   cp.logical_and(seg_slices, gt_stack_gpu).sum(axis=(1,2))
-            U =   cp.logical_or (seg_slices, gt_stack_gpu).sum(axis=(1,2))
-            jaccs = cp.where(U>0, I/U, 0.0)
-            mean_j = float(jaccs.mean().item())
+            for b in betas:
+                seg_gpu    = thresholding_niblack_gpu(img_gpu, k, mean_gpu, std_gpu, b)
+                seg_slices = seg_gpu[indices]                      # (S,H,W)
+                I =   cp.logical_and(seg_slices, gt_stack_gpu).sum(axis=(1,2))
+                U =   cp.logical_or (seg_slices, gt_stack_gpu).sum(axis=(1,2))
+                jaccs = cp.where(U>0, I/U, 0.0)
+                mean_j = float(jaccs.mean().item())
 
-            if mean_j > best_val:
-                best_val    = mean_j
-                best_params = {"w":int(w), "k":float(k), "beta":beta, "jaccard":mean_j}
-                best_image  = cp.asnumpy(seg_gpu)
-                logger.info(" New best IoU=%.4f at w=%d, k=%.3f", mean_j, w, k)
+                if mean_j > best_val:
+                    best_val    = mean_j
+                    best_params = {"w":int(w), "k":float(k), "beta":float(b), "jaccard":mean_j}
+                    best_image  = cp.asnumpy(seg_gpu)
+                    logger.info(" New best IoU=%.4f at w=%d, k=%.3f, beta=%.4f",
+                                mean_j, w, k, b)
 
-            pbar.update()
+                pbar.update()
     pbar.close()
 
     logger.info("Sweep finished; best params = %s", best_params)

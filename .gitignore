@@ -4,3 +4,5 @@
 /segmentation/algorithms/__pycache__/
 /__pycache__/
 /.cupy/
+environment.yml
+conda*

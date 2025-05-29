@@ -265,8 +265,14 @@ def stacked_threshold_plots(metrics_data: MetricsData,
         ax.set_xticks(angles_gt[2:])
         ax.get_xaxis().set_major_formatter(mticker.ScalarFormatter())
         ax.grid(axis='y', linestyle='--', alpha=0.4)
-        ax.set_ylim(0.4, 1.02)
-        ax.set_ylabel(algo if algo != "brute" else "classic", rotation=0, labelpad=40, va='center', fontsize=10)
+        print(metric_name)
+        ax.set_ylim(0.4 if metric_name == "iou" else 0.2 , 1.02)
+        name_for_legend = algo
+        if name_for_legend == "brute":
+            name_for_legend = "Classic"
+        elif name_for_legend == "beta_niblack_3d":
+            name_for_legend = "Affine Niblack 3d"
+        ax.set_ylabel(name_for_legend, rotation=0, labelpad=40, va='center', fontsize=10)
 
     # bottom axis labels
     axes[-1].set_xlabel("Number of Angles", fontsize=11)
@@ -286,9 +292,11 @@ def stacked_threshold_plots(metrics_data: MetricsData,
 
 if __name__ == "__main__":
     print("Start visualization")
+    print("--------------------------------------------------")
     metrics_data = MetricsData()
     datasets = metrics_data.get_datasets()
     colors = generate_distinct_colors(datasets)
+    thresholds = np.arange(0.2, 1.1, 0.03)
     # for algorithm, data in metrics_data.get_per_algorithm_data("Neighbor metrics"):
     #     print("Processing algorithm {}".format(algorithm))
     #     scatter_plots(data, algorithm, colors)
@@ -298,37 +306,36 @@ if __name__ == "__main__":
     #     scatter_plots_per_dataset(data, algorithm, True)
     #     superplot_metrics(data, algorithm, colors)
     
-    for algorithm in metrics_data.get_algorithms():
-        print("Processing algorithm {} - thresholds".format(algorithm))
-        thresholds = np.arange(0.2, 1.1, 0.03)
-        for metric in ["iou", "boundarydice"]:
-            angles = []
-            metrics = []
-            for threshold in tqdm(thresholds):
-                angle, metric_value = metrics_data.get_threshold_data(threshold, algorithm, metric)
-                angles.append(angle)
-                metrics.append(metric_value)
-            angles = np.array(angles)
-            metrics = np.array(metrics) 
-            angles_gt, mean_metrics_gt = metrics_data.get_mean_ground_truth(algorithm, metric)
-            plt.clf()
-            fig, ax = plt.subplots(figsize=(8,5), dpi=120)
-            ax.plot(angles,        metrics,        marker='o', linestyle='-',  label='Thresholds')
-            ax.plot(angles_gt[3:], mean_metrics_gt[3:], marker='s', linestyle='--', label='GT Mean')
-            ax.set_xscale('log', base=2)
-            ax.set_xticks(angles_gt[3:])
-            ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
-            ax.set_xlabel("Number of Angles")
-            ax.set_ylabel(f"Mean {metric.title()}")
-            ax.set_ylim(0,1)
-            ax.grid(axis='y', linestyle='--', alpha=0.5)
-            ax.grid(axis='x', linestyle='--', alpha=0.5)
-            ax.legend()
-            plt.tight_layout()
-            plt.legend()
-            folder = config.VISUALIZATION_PATH / "threshold" / algorithm
-            makedirs(folder, exist_ok=True)
-            plt.savefig("{0}/{1}_threshold.png".format(folder, metric))
+    # for algorithm in metrics_data.get_algorithms():
+    #     print("Processing algorithm {} - thresholds".format(algorithm))
+    #     for metric in ["iou", "boundarydice"]:
+    #         angles = []
+    #         metrics = []
+    #         for threshold in tqdm(thresholds):
+    #             angle, metric_value = metrics_data.get_threshold_data(threshold, algorithm, metric)
+    #             angles.append(angle)
+    #             metrics.append(metric_value)
+    #         angles = np.array(angles)
+    #         metrics = np.array(metrics) 
+    #         angles_gt, mean_metrics_gt = metrics_data.get_mean_ground_truth(algorithm, metric)
+    #         plt.clf()
+    #         fig, ax = plt.subplots(figsize=(8,5), dpi=120)
+    #         ax.plot(angles,        metrics,        marker='o', linestyle='-',  label='Thresholds')
+    #         ax.plot(angles_gt[3:], mean_metrics_gt[3:], marker='s', linestyle='--', label='GT Mean')
+    #         ax.set_xscale('log', base=2)
+    #         ax.set_xticks(angles_gt[3:])
+    #         ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
+    #         ax.set_xlabel("Number of Angles")
+    #         ax.set_ylabel(f"Mean {metric.title()}")
+    #         ax.set_ylim(0,1)
+    #         ax.grid(axis='y', linestyle='--', alpha=0.5)
+    #         ax.grid(axis='x', linestyle='--', alpha=0.5)
+    #         ax.legend()
+    #         plt.tight_layout()
+    #         plt.legend()
+    #         folder = config.VISUALIZATION_PATH / "threshold" / algorithm
+    #         makedirs(folder, exist_ok=True)
+    #         plt.savefig("{0}/{1}_threshold.png".format(folder, metric))
 
     for metric in ["iou", "boundarydice", "mse"]:
         stacked_threshold_plots(

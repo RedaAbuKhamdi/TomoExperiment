@@ -129,7 +129,7 @@ class MetricsData:
                         raise Exception("Metric {} not found".format(metric))
                     neighbor_metrics = data["metric_values"][dataset][metric]["Neighbor metrics"]
                     gt_metrics = data["metric_values"][dataset][metric]["Ground truth metrics"]
-                    for i in range(neighbor_metrics.shape[0]):
+                    for i in range(3, neighbor_metrics.shape[0]):
                         if neighbor_metrics[i] > threshold:
                             amount += 1
                             mean_angle += angles[i]

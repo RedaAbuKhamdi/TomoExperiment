@@ -144,10 +144,8 @@ def scatter_plots_mean_ground_truth(algorithm_data: dict, algorithm : str, color
         values /= len(datasets)
         plt.scatter(angles.astype(str), values, color=colors[dataset])
 
-        if delta:
-            plt.title("Bubble Chart of mean {} differences values across datasets".format(metric_name))
-        else:
-            plt.title("Bubble Chart of mean {} values across datasets".format(metric_name))
+        plt.title("Bubble Chart of mean {} values across datasets".format(metric_name))
+            
 
         plt.xlabel("Number of Angles")
         plt.ylabel("Metric Value")
@@ -162,21 +160,29 @@ def superplot_metrics(algorithm_data: dict,
                       colors: dict,
                       elbow_angle: int = None):
     """
-    Draw two panels:
-      (a) Metric1 vs #angles, one curve per dataset
-      (b) Metric2 vs #angles, same curves & colors
-    Legend at bottom; log-2 x-axis; optional elbow_line.
+    Draw N panels in one row—one curve per dataset in each panel—where:
+      - X = #angles (log₂ scale)
+      - Y = metric value [0..1]
+      - Legend (datasets) at bottom
+      - Optional vertical dashed line at elbow_angle
     """
     datasets      = algorithm_data["datasets"]
     angles        = algorithm_data["angles"].astype(int)
     metric_values = algorithm_data["metric_values"]
-    metrics       = list(metric_values[datasets[0]].keys())[0:2]
+    metrics       = list(metric_values[datasets[0]].keys())
+    n_metrics     = len(metrics)
 
-    # Prepare output folder
+    # prepare output directory
     out_dir = config.VISUALIZATION_PATH / algorithm
-    makedirs(out_dir, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    fig, axes = plt.subplots(1, 2, figsize=(12,5), dpi=120, sharey=True)
+    # make a 1×N grid of subplots
+    fig, axes = plt.subplots(1, n_metrics,
+                             figsize=(4*n_metrics, 4),
+                             dpi=120,
+                             sharex=True)
+    if n_metrics == 1:
+        axes = [axes]
 
     for ax, metric_name in zip(axes, metrics):
         for ds in datasets:
@@ -185,30 +191,97 @@ def superplot_metrics(algorithm_data: dict,
                     marker='o', linestyle='-',
                     color=colors[ds],
                     label=ds)
+        # log₂ x-axis
         ax.set_xscale('log', base=2)
         ax.set_xticks(angles)
         ax.get_xaxis().set_major_formatter(mticker.ScalarFormatter())
         ax.tick_params(axis='x', rotation=45)
-        ax.grid(axis='y', linestyle='--', alpha=0.5)
-        ax.set_xlabel("Number of Angles", fontsize=12)
-        ax.set_title(f"{metric_name.capitalize()}", fontsize=14)
-    axes[0].set_ylabel("Metric Value", fontsize=12)
-    axes[0].set_ylim(0,1.02)
+        ax.grid(axis='y', linestyle='--', alpha=0.3)
 
-    # optional “elbow” line
-    if elbow_angle is not None:
-        for ax in axes:
-            ax.axvline(elbow_angle, color='gray', linestyle='--', alpha=0.7)
+        ax.set_title(metric_name.upper(), fontsize=12)
+        ax.set_ylim(0, 1.02)
+        if ax is axes[0]:
+            ax.set_ylabel("Metric Value", fontsize=11)
+        ax.set_xlabel("Angles", fontsize=11)
 
-    # shared legend at bottom
+        # optional elbow line
+        if elbow_angle is not None:
+            ax.axvline(elbow_angle, color='gray', linestyle='--', alpha=0.6)
+
+    # common legend along bottom
     fig.legend(datasets,
                loc='lower center',
                ncol=len(datasets),
                frameon=False,
-               fontsize=10)
+               fontsize=9)
 
     plt.tight_layout(rect=[0,0.12,1,1])
     fig.savefig(out_dir / "summary_metrics.png", bbox_inches='tight')
+    plt.close(fig)
+
+def stacked_threshold_plots(metrics_data: MetricsData,
+                            algorithms: list[str],
+                            metric_name: str,
+                            thresholds: np.ndarray,
+                            out_folder):
+    """
+    For a single metric (e.g. "iou"), draw one subplot per algorithm (stacked vertically),
+    showing both:
+      • the metric vs #angles when sweeping thresholds
+      • the mean‐GT curve on top
+    Saves out_folder / f"{metric_name}_thresholds_stacked.png".
+    """
+    n = len(algorithms)
+    # make n×1 subplots
+    fig, axes = plt.subplots(n, 1,
+                             figsize=(8, 2.5 * n),
+                             sharex=True,
+                             dpi=120)
+    if n == 1:
+        axes = [axes]
+
+    for ax, algo in zip(axes, algorithms):
+        # 1) collect the threshold‐sweep data
+        angles_th, values_th = [], []
+        for thr in thresholds:
+            angle, val = metrics_data.get_threshold_data(thr, algo, metric_name)
+            angles_th.append(angle)
+            values_th.append(val)
+        angles_th = np.array(angles_th)
+        values_th = np.array(values_th)
+
+        # 2) get the ground‐truth mean curve
+        angles_gt, mean_gt = metrics_data.get_mean_ground_truth(algo, metric_name)
+        # 3) plot both
+        ax.plot(angles_th, values_th,
+                marker='o', linestyle='-',
+                label="Thresholds")
+        ax.plot(angles_gt[2:], mean_gt[2:],
+                marker='s', linestyle='--',
+                label="GT Mean")
+
+        # 4) styling
+        ax.set_xscale('log', base=2)
+        ax.set_xticks(angles_gt[2:])
+        ax.get_xaxis().set_major_formatter(mticker.ScalarFormatter())
+        ax.grid(axis='y', linestyle='--', alpha=0.4)
+        ax.set_ylim(0.4, 1.02)
+        ax.set_ylabel(algo if algo != "brute" else "classic", rotation=0, labelpad=40, va='center', fontsize=10)
+
+    # bottom axis labels
+    axes[-1].set_xlabel("Number of Angles", fontsize=11)
+
+    # shared legend
+    fig.legend(["Thresholds","GT Mean"],
+               loc='lower center',
+               ncol=2,
+               frameon=False,
+               fontsize=10)
+
+    plt.tight_layout(rect=[0, 0.12, 1, 1])
+    out_folder.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_folder / f"{metric_name}_thresholds_stacked.png",
+                bbox_inches='tight')
     plt.close(fig)
 
 if __name__ == "__main__":
@@ -216,18 +289,18 @@ if __name__ == "__main__":
     metrics_data = MetricsData()
     datasets = metrics_data.get_datasets()
     colors = generate_distinct_colors(datasets)
-    for algorithm, data in metrics_data.get_per_algorithm_data("Neighbor metrics"):
-        print("Processing algorithm {}".format(algorithm))
-        scatter_plots(data, algorithm, colors)
-        scatter_plots_per_dataset(data, algorithm)
-    for algorithm, data in metrics_data.get_per_algorithm_data("Ground truth metrics"):
-        print("Processing algorithm {}".format(algorithm))
-        scatter_plots_per_dataset(data, algorithm, True)
-        superplot_metrics(data, algorithm, colors)
+    # for algorithm, data in metrics_data.get_per_algorithm_data("Neighbor metrics"):
+    #     print("Processing algorithm {}".format(algorithm))
+    #     scatter_plots(data, algorithm, colors)
+    #     scatter_plots_per_dataset(data, algorithm)
+    # for algorithm, data in metrics_data.get_per_algorithm_data("Ground truth metrics"):
+    #     print("Processing algorithm {}".format(algorithm))
+    #     scatter_plots_per_dataset(data, algorithm, True)
+    #     superplot_metrics(data, algorithm, colors)
     
     for algorithm in metrics_data.get_algorithms():
         print("Processing algorithm {} - thresholds".format(algorithm))
-        thresholds = np.arange(0, 1.1, 0.05)
+        thresholds = np.arange(0.2, 1.1, 0.03)
         for metric in ["iou", "boundarydice"]:
             angles = []
             metrics = []
@@ -241,9 +314,9 @@ if __name__ == "__main__":
             plt.clf()
             fig, ax = plt.subplots(figsize=(8,5), dpi=120)
             ax.plot(angles,        metrics,        marker='o', linestyle='-',  label='Thresholds')
-            ax.plot(angles_gt,     mean_metrics_gt,marker='s', linestyle='--', label='GT Mean')
+            ax.plot(angles_gt[3:], mean_metrics_gt[3:], marker='s', linestyle='--', label='GT Mean')
             ax.set_xscale('log', base=2)
-            ax.set_xticks(angles_gt)
+            ax.set_xticks(angles_gt[3:])
             ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
             ax.set_xlabel("Number of Angles")
             ax.set_ylabel(f"Mean {metric.title()}")
@@ -256,3 +329,12 @@ if __name__ == "__main__":
             folder = config.VISUALIZATION_PATH / "threshold" / algorithm
             makedirs(folder, exist_ok=True)
             plt.savefig("{0}/{1}_threshold.png".format(folder, metric))
+
+    for metric in ["iou", "boundarydice", "mse"]:
+        stacked_threshold_plots(
+            metrics_data=metrics_data,
+            algorithms=metrics_data.get_algorithms(),
+            metric_name=metric,
+            thresholds=thresholds,
+            out_folder=(config.VISUALIZATION_PATH / "threshold_stacked")
+        )

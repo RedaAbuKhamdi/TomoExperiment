@@ -24,6 +24,7 @@ class Data:
         self.n = len(image_paths)
         image_paths.sort(key=natural_sort_key)
         self._create_image_with_geometry(image_paths)
+        self.noise = {}
 
     def parse_settings(self, path):
         with open(path, "r") as file:
@@ -43,7 +44,7 @@ class Data:
             image[i] = image[i] / factor
         
         image = np.array(image)
-        data_geometry = astra.create_vol_geom(image.shape[2], image.shape[1], image.shape[0])
+        data_geometry = astra.create_vol_geom(image.shape[1], image.shape[2], image.shape[0])
         self.data_id = astra.data3d.create("-vol", data_geometry, data = image)
     
         self.sinogram_id = None
@@ -65,6 +66,14 @@ class Data:
             elif noise["type"] == "shading":
                 shading_level = result
         return noise_level, shading_level
+    def get_noise_value(self, type):
+        if type in self.noise.keys():
+            return self.noise[type]
+        else:
+            return None
+
+    def set_noise_data(self, type, value):
+        self.noise[type] = value
     def calculate_sinogram(self, projector, projection_geometry): 
         image = astra.data3d.get(self.data_id)
         self.data_id = astra.data3d.create("-vol", self.data_geometry, data = image)

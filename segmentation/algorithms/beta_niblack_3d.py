@@ -13,6 +13,7 @@ from matplotlib import pyplot as plt
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 import config
 from imagedata import ImageData
+import logging
 
 def thresholding_niblack_gpu(img_f: cp.ndarray,
                              q: float,
@@ -27,24 +28,42 @@ def thresholding_niblack_gpu(img_f: cp.ndarray,
     return img_f >= (mean + std * q + beta)
 
 
-def calculate_mean_std_gpu(img_f: cp.ndarray, window: int) -> tuple:
-    # compute local mean of I and I^2, but only in-plane:
-    # size = (1, window, window) → radius 0 in z, radius window//2 in y,x
-    mean   = ndi_gpu.uniform_filter(img_f,
-                                    size=(1, window, window),
-                                    mode="reflect")
-    meansq = ndi_gpu.uniform_filter(img_f * img_f,
-                                    size=(1, window, window),
-                                    mode="reflect")
+def calculate_mean_std_gpu(img: cp.ndarray,
+                                    window: int) -> tuple[cp.ndarray,cp.ndarray]:
+    """
+    Compute local mean & std on each (y,x) slice with a window of half‐width=window//2,
+    but automatically shrink at the borders (so you never rely on padding).
+    Uses a mask+box‐filter trick to count valid pixels per window.
+    """
+    # img has shape (D, H, W)
+    D, H, W = img.shape
+    size = (1, window, window)
+    area = window * window
 
-    # std = sqrt(E[x^2] - E[x]^2), clamp negative round‐off to zero
-    std = cp.sqrt(cp.clip(meansq - mean * mean, 0, None))
+    # 1) sum of values in each local box (zeros outside)
+    mean_zero = ndi_gpu.uniform_filter(img, size=size,
+                                      mode='constant', cval=0.0)
+    sum_vals  = mean_zero * area
 
-    return mean, std
-import logging
-import tqdm
-import numpy as np
-import cupy as cp
+    # 2) build a mask of “1” for real pixels, 0 for outside
+    mask      = cp.ones_like(img, dtype=cp.float32)
+    mean_m    = ndi_gpu.uniform_filter(mask, size=size,
+                                      mode='constant', cval=0.0)
+    count     = mean_m * area   # how many real pixels in each local window
+
+    # 3) true local mean = sum_vals / count  (avoid division by zero)
+    mean_loc  = sum_vals / cp.maximum(count, 1.0)
+
+    # 4) same for sum of squares
+    sumsq_zero = ndi_gpu.uniform_filter(img*img, size=size,
+                                        mode='constant', cval=0.0)
+    sumsq      = sumsq_zero * area
+
+    # 5) variance = E[x²] – (E[x])²
+    var_loc    = sumsq / cp.maximum(count, 1.0) - mean_loc*mean_loc
+    std_loc    = cp.sqrt(cp.clip(var_loc, 0.0, None))
+
+    return mean_loc, std_loc
 
 # at top‐level once per module
 logger = logging.getLogger(__name__)
@@ -58,16 +77,12 @@ if not logger.handlers:
 
 def segment(imageData: ImageData, params: dict = None):
     """
-    If params given: single Niblack with (w, k, beta).
-    Otherwise: sweep (w, k, beta) to maximize mean‐Jaccard.
+    If params provided: single Niblack with (w, k, beta).
+    Otherwise: sweep (w, k, beta) to minimize mean-squared error over GT slices.
     """
     name    = imageData.settings["name"]
     img     = imageData.image
     img_gpu = cp.asarray(img, dtype=cp.float32)
-
-    # baseline beta = global std
-    beta0 = float(cp.std(img_gpu).item())
-    logger.info("Segment called for '%s'; baseline beta=%.4f", name, beta0)
 
     # single-call mode
     if params:
@@ -77,7 +92,7 @@ def segment(imageData: ImageData, params: dict = None):
         return cp.asnumpy(seg_gpu), params
 
     # --- full sweep mode ---
-    logger.info("No params provided; running full w×k×beta sweep")
+    logger.info("No params provided; running full w,k,beta sweep for MSE")
 
     # 1) load GT once
     gt_list       = list(imageData.get_ground_truth_slices())
@@ -85,12 +100,14 @@ def segment(imageData: ImageData, params: dict = None):
     indices       = np.array(indices, dtype=np.int64)
     gt_stack_gpu  = cp.stack([cp.asarray(g, dtype=cp.bool_) for g in gts], axis=0)
     S             = gt_stack_gpu.shape[0]
-    logger.info("Evaluating on %d ground-truth slices", S)
+    logger.info("Evaluating MSE on %d ground-truth slices", S)
 
     # 2) define parameter grids
-    windows = np.arange(5, 125, 20, dtype=int)      # e.g. [5,25,45,65,85,105]
-    ks      = np.linspace(-0.5, 0.5, 50, dtype=float)  # 100 values
-    betas   = np.linspace(0, cp.max(img_gpu).item(), 30, dtype=float)
+    windows = np.arange(5, min(125, min(img.shape)), 20, dtype=int)      # e.g. [5,25,45,65,85,105]
+    ks      = np.linspace(-1, 1, 80, dtype=float)  # 100 values
+    betas   = np.linspace(-cp.max(img_gpu).item() / 2,
+                          cp.max(img_gpu).item() / 2,
+                          40, dtype=float)
     total_runs = windows.size * ks.size * betas.size
     logger.info("Grid size: %d windows × %d ks × %d betas = %d runs",
                 windows.size, ks.size, betas.size, total_runs)
@@ -101,8 +118,8 @@ def segment(imageData: ImageData, params: dict = None):
     for w in tqdm.tqdm(windows, desc="Precompute windows"):
         stats[w] = calculate_mean_std_gpu(img_gpu, w)
 
-    # 4) sweep
-    best_val    = -1.0
+    # 4) sweep to minimize MSE
+    best_val    = float('inf')
     best_params = {}
     best_image  = None
     pbar = tqdm.tqdm(total=total_runs, desc="Sweeping", unit="run")
@@ -112,18 +129,24 @@ def segment(imageData: ImageData, params: dict = None):
         for k in ks:
             for b in betas:
                 seg_gpu    = thresholding_niblack_gpu(img_gpu, k, mean_gpu, std_gpu, b)
-                seg_slices = seg_gpu[indices]                      # (S,H,W)
-                I =   cp.logical_and(seg_slices, gt_stack_gpu).sum(axis=(1,2))
-                U =   cp.logical_or (seg_slices, gt_stack_gpu).sum(axis=(1,2))
-                jaccs = cp.where(U>0, I/U, 0.0)
-                mean_j = float(jaccs.mean().item())
+                seg_slices = seg_gpu[indices]  # shape (S, H, W)
 
-                if mean_j > best_val:
-                    best_val    = mean_j
-                    best_params = {"w":int(w), "k":float(k), "beta":float(b), "jaccard":mean_j}
+                # compute MSE per slice, then average
+                diff          = seg_slices.astype(cp.float32) - gt_stack_gpu.astype(cp.float32)
+                mse_per_slice = cp.mean(diff*diff, axis=(1,2))
+                mean_mse      = float(mse_per_slice.mean().item())
+
+                if mean_mse < best_val:
+                    best_val    = mean_mse
+                    best_params = {
+                        "w":     int(w),
+                        "k":     float(k),
+                        "beta":  float(b),
+                        "mse":   mean_mse
+                    }
                     best_image  = cp.asnumpy(seg_gpu)
-                    logger.info(" New best IoU=%.4f at w=%d, k=%.3f, beta=%.4f",
-                                mean_j, w, k, b)
+                    logger.info(" New best MSE=%.4f at w=%d, k=%.3f, beta=%.4f",
+                                mean_mse, w, k, b)
 
                 pbar.update()
     pbar.close()

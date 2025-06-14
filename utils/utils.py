@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 import trimesh
 
-def stl_to_png_slices(stl_path, out_folder, resolution=128):
+def stl_to_png_slices(stl_path, out_folder, resolution=256):
     # Load the STL mesh
     mesh = trimesh.load(stl_path)
 

@@ -9,7 +9,7 @@ from skimage import io
 import cupyx.scipy.ndimage as cpndi
 import cupy as cp
 
-def add_shading_and_noise_in_chunks(sino_id, sino_shape, noise_std, shade_frac=0.3, chunk_size=32):
+def add_shading_and_noise_in_chunks(sino_id, sino_shape, noise_std, shade_frac=0.3, chunk_size=32, gaussian = None, shading_amp = None):
         """
         Reads your full sinogram from ASTRA, processes it in GPU‐backed chunks of `chunk_size` slices,
         then writes the final result back to ASTRA in one go.
@@ -22,8 +22,9 @@ def add_shading_and_noise_in_chunks(sino_id, sino_shape, noise_std, shade_frac=0
         # 2) compute its range once
         sino_min, sino_max = sino.min(), sino.max()
         sino_range = float(sino_max - sino_min)
-        shading_amp = shade_frac * sino_range
+        shading_amp = shading_amp if shading_amp is not None else shade_frac * sino_range
         sigma_y, sigma_x = H/4, W/4
+        gaussian = gaussian if gaussian is not None else noise_std * sino_range
 
         # 3) process chunk by chunk
         for start in range(0, D, chunk_size):
@@ -45,7 +46,7 @@ def add_shading_and_noise_in_chunks(sino_id, sino_shape, noise_std, shade_frac=0
             bias = smooth * shading_amp
 
             # b) fine noise
-            noise = cp.random.normal(0, noise_std * sino_range,
+            noise = cp.random.normal(0, gaussian,
                                     size=(sz, H, W), dtype=cp.float32)
 
             # combine
@@ -61,7 +62,7 @@ def add_shading_and_noise_in_chunks(sino_id, sino_shape, noise_std, shade_frac=0
 
         # 4) write full updated sinogram back into ASTRA
         astra.data3d.store(sino_id, sino)
-        return
+        return noise_std * sino_range, shading_amp
 
 class Reconstruction:
     def __init__(self, data : Data):
@@ -96,12 +97,21 @@ class Reconstruction:
         noise_level, shading_level = self.data.get_noise_level()
 
         if shading_level > 0 or noise_level > 0:
+            gaussian = self.data.get_noise_value("gaussian")
+            shading = self.data.get_noise_value("shading")
             # do chunked GPU shading+noise
-            add_shading_and_noise_in_chunks(sino_id,
+            gaussian, shading = add_shading_and_noise_in_chunks(sino_id,
                                             sino_shape,
                                             noise_level,
                                             shading_level,
-                                            chunk_size=32)
+                                            chunk_size=32,
+                                            gaussian = gaussian,
+                                            shading_amp = shading)
+            
+            if gaussian > 0:
+                self.data.set_noise_data("gaussian", gaussian)
+            if shading > 0:
+                self.data.set_noise_data("shading", shading)
         
         print("Finish")
         self.noise = noise_level

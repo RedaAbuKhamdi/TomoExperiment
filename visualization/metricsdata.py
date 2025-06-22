@@ -65,7 +65,9 @@ class MetricsData:
                 if dataset_config["algorithm"] not in self.algorithms:
                     self.algorithms.append(dataset_config["algorithm"])
         return self.algorithms
-
+    
+    def get_angle_amount(self):
+        return pd.read_csv(self.data[0]["evaluations"][0]["path"], header = 0, index_col= 0).index.to_numpy().size
     def get_datasets(self):
         if self.datasets is None:
             self.datasets = []
@@ -117,7 +119,7 @@ class MetricsData:
                 return angles, mean_gt_metric
         raise Exception("Algorithm {} not found".format(algorithm))
     
-    def get_threshold_data(self, threshold : float, algorithm : str, metric : str):
+    def get_threshold_data(self, threshold : float, algorithm : str, metric : str, min_n : int):
         for algorithm_iter, data in self.get_per_algorithm_data():
             if algorithm_iter == algorithm:
                 mean_angle = 0
@@ -129,7 +131,7 @@ class MetricsData:
                         raise Exception("Metric {} not found".format(metric))
                     neighbor_metrics = data["metric_values"][dataset][metric]["Neighbor metrics"]
                     gt_metrics = data["metric_values"][dataset][metric]["Ground truth metrics"]
-                    for i in range(3, neighbor_metrics.shape[0]):
+                    for i in range(min_n, neighbor_metrics.shape[0]):
                         if neighbor_metrics[i] > threshold:
                             amount += 1
                             mean_angle += angles[i]
@@ -144,7 +146,7 @@ class MetricsData:
                     mean_gt_metric /= amount
                 return mean_angle, mean_gt_metric
         raise Exception("Algorithm {} not found".format(algorithm))
-    
+
     def get_threshold_data_per_dataset(self, threshold : float, algorithm : str, metric : str, target_dataset : str):
         for algorithm, data in self.get_per_algorithm_data():
             if algorithm == algorithm:

@@ -28,43 +28,46 @@ def thresholding_niblack_gpu(img_f: cp.ndarray,
     return img_f >= (mean + std * q + beta)
 
 
-def calculate_mean_std_gpu(img: cp.ndarray,
-                                    window: int) -> tuple[cp.ndarray,cp.ndarray]:
+
+def tversky_gpu(seg: cp.ndarray,
+                gt:  cp.ndarray,
+                alpha: float = 0.7,
+                beta:  float = 0.3) -> float:
     """
-    Compute local mean & std on each (y,x) slice with a window of half‐width=window//2,
-    but automatically shrink at the borders (so you never rely on padding).
-    Uses a mask+box‐filter trick to count valid pixels per window.
+    seg, gt: boolean cupy arrays of the same shape.
+    alpha: weight on false positives
+    beta:  weight on false negatives
+    returns float Tversky index in [0..1].
     """
-    # img has shape (D, H, W)
+    tp = cp.logical_and(seg, gt).sum()
+    fp = cp.logical_and(seg, cp.logical_not(gt)).sum()
+    fn = cp.logical_and(cp.logical_not(seg), gt).sum()
+    denom = tp + alpha*fp + beta*fn
+    return float((tp / denom).item()) if denom > 0 else 1.0
+
+def calculate_mean_std_gpu(img: cp.ndarray, window: int) -> tuple[cp.ndarray, cp.ndarray]:
+    """Compute local mean & std using 3D windows"""
     D, H, W = img.shape
-    size = (1, window, window)
-    area = window * window
+    size = (window, window, window)  # Now truly 3D
+    area = window * window * window  # Volume instead of area
 
-    # 1) sum of values in each local box (zeros outside)
-    mean_zero = ndi_gpu.uniform_filter(img, size=size,
-                                      mode='constant', cval=0.0)
-    sum_vals  = mean_zero * area
-
-    # 2) build a mask of “1” for real pixels, 0 for outside
-    mask      = cp.ones_like(img, dtype=cp.float32)
-    mean_m    = ndi_gpu.uniform_filter(mask, size=size,
-                                      mode='constant', cval=0.0)
-    count     = mean_m * area   # how many real pixels in each local window
-
-    # 3) true local mean = sum_vals / count  (avoid division by zero)
-    mean_loc  = sum_vals / cp.maximum(count, 1.0)
-
-    # 4) same for sum of squares
-    sumsq_zero = ndi_gpu.uniform_filter(img*img, size=size,
-                                        mode='constant', cval=0.0)
-    sumsq      = sumsq_zero * area
-
-    # 5) variance = E[x²] – (E[x])²
-    var_loc    = sumsq / cp.maximum(count, 1.0) - mean_loc*mean_loc
-    std_loc    = cp.sqrt(cp.clip(var_loc, 0.0, None))
-
+    # Rest of the implementation remains similar but operates in 3D
+    mean_zero = ndi_gpu.uniform_filter(img, size=size, mode='constant', cval=0.0)
+    sum_vals = mean_zero * area
+    
+    mask = cp.ones_like(img, dtype=cp.float32)
+    mean_m = ndi_gpu.uniform_filter(mask, size=size, mode='constant', cval=0.0)
+    count = mean_m * area
+    
+    mean_loc = sum_vals / cp.maximum(count, 1.0)
+    
+    sumsq_zero = ndi_gpu.uniform_filter(img*img, size=size, mode='constant', cval=0.0)
+    sumsq = sumsq_zero * area
+    
+    var_loc = sumsq / cp.maximum(count, 1.0) - mean_loc*mean_loc
+    std_loc = cp.sqrt(cp.clip(var_loc, 0.0, None))
+    
     return mean_loc, std_loc
-
 # at top‐level once per module
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -92,7 +95,7 @@ def segment(imageData: ImageData, params: dict = None):
         return cp.asnumpy(seg_gpu), params
 
     # --- full sweep mode ---
-    logger.info("No params provided; running full w,k,beta sweep for MSE")
+    logger.info("No params provided; running full w,k,beta sweep for iou")
 
     # 1) load GT once
     gt_list       = list(imageData.get_ground_truth_slices())
@@ -100,14 +103,14 @@ def segment(imageData: ImageData, params: dict = None):
     indices       = np.array(indices, dtype=np.int64)
     gt_stack_gpu  = cp.stack([cp.asarray(g, dtype=cp.bool_) for g in gts], axis=0)
     S             = gt_stack_gpu.shape[0]
-    logger.info("Evaluating MSE on %d ground-truth slices", S)
+    logger.info("Evaluating iou on %d ground-truth slices", S)
 
     # 2) define parameter grids
-    windows = np.arange(5, min(125, min(img.shape)), 20, dtype=int)      # e.g. [5,25,45,65,85,105]
-    ks      = np.linspace(-1, 1, 80, dtype=float)  # 100 values
-    betas   = np.linspace(-cp.max(img_gpu).item() / 2,
-                          cp.max(img_gpu).item() / 2,
-                          40, dtype=float)
+    windows = np.arange(20, min(70, min(img.shape)), 13, dtype=int)
+    ks      = np.linspace(-0.1, 0.1, 40, dtype=float)  # 100 values
+    betas   = np.linspace(cp.min(img_gpu).item() ,
+                          cp.max(img_gpu).item() ,
+                          50, dtype=float)
     total_runs = windows.size * ks.size * betas.size
     logger.info("Grid size: %d windows × %d ks × %d betas = %d runs",
                 windows.size, ks.size, betas.size, total_runs)
@@ -118,8 +121,8 @@ def segment(imageData: ImageData, params: dict = None):
     for w in tqdm.tqdm(windows, desc="Precompute windows"):
         stats[w] = calculate_mean_std_gpu(img_gpu, w)
 
-    # 4) sweep to minimize MSE
-    best_val    = float('inf')
+    # 4) sweep to minimize iou
+    best_val    = float('-inf')
     best_params = {}
     best_image  = None
     pbar = tqdm.tqdm(total=total_runs, desc="Sweeping", unit="run")
@@ -134,19 +137,19 @@ def segment(imageData: ImageData, params: dict = None):
                 # compute MSE per slice, then average
                 diff          = seg_slices.astype(cp.float32) - gt_stack_gpu.astype(cp.float32)
                 mse_per_slice = cp.mean(diff*diff, axis=(1,2))
-                mean_mse      = float(mse_per_slice.mean().item())
+                score = tversky_gpu(seg_slices, gt_stack_gpu, alpha=0.7, beta=0.3)
 
-                if mean_mse < best_val:
-                    best_val    = mean_mse
+                if score > best_val:
+                    best_val    = score
                     best_params = {
                         "w":     int(w),
                         "k":     float(k),
                         "beta":  float(b),
-                        "mse":   mean_mse
+                        "iou":   score
                     }
                     best_image  = cp.asnumpy(seg_gpu)
-                    logger.info(" New best MSE=%.4f at w=%d, k=%.3f, beta=%.4f",
-                                mean_mse, w, k, b)
+                    logger.info(" New best iou=%.4f at w=%d, k=%.3f, beta=%.4f",
+                                score, w, k, b)
 
                 pbar.update()
     pbar.close()

@@ -1,5 +1,6 @@
 import sys
 import numpy as np
+import pandas as pd
 
 from os import environ, listdir, makedirs, path
 from matplotlib import pyplot as plt
@@ -296,7 +297,7 @@ if __name__ == "__main__":
     metrics_data = MetricsData()
     datasets = metrics_data.get_datasets()
     colors = generate_distinct_colors(datasets)
-    thresholds = np.arange(0.4, 1.1, 0.05)
+    thresholds = np.arange(0.4, 1.02, 0.05)
     for algorithm, data in metrics_data.get_per_algorithm_data("Neighbor metrics"):
         print("Processing algorithm {}".format(algorithm))
         scatter_plots(data, algorithm, colors)
@@ -307,40 +308,65 @@ if __name__ == "__main__":
         superplot_metrics(data, algorithm, colors)
     
     for algorithm in metrics_data.get_algorithms():
-        print("Processing algorithm {} - thresholds".format(algorithm))
+        print(f"Processing algorithm {algorithm} - thresholds")
         for metric in ["iou", "boundarydice"]:
+            # prepare for both plotting and CSV
+            rows = []
             plt.clf()
             fig, ax = plt.subplots(figsize=(8,5), dpi=120)
+
+            # ground-truth mean curve
             angles_gt, mean_metrics_gt = metrics_data.get_mean_ground_truth(algorithm, metric)
-            ax.plot(angles_gt[3:], mean_metrics_gt[3:], marker='s', linestyle='--', label='Среднее значение по эталону')
+            ax.plot(angles_gt[3:], mean_metrics_gt[3:],
+                    marker='s', linestyle='--',
+                    label='Среднее значение по эталону')
+
             max_metric_val = np.max(mean_metrics_gt)
+
+            # for each stopping‐rule α = 3…max
             for n in range(3, metrics_data.get_angle_amount()):
                 angles = []
-                metrics = []
-                for threshold in tqdm(thresholds):
-                    angle, metric_value = metrics_data.get_threshold_data(threshold, algorithm, metric, n)
+                values = []
+                for thr in tqdm(thresholds, desc=f"α={n}", leave=False):
+                    angle, val = metrics_data.get_threshold_data(thr, algorithm, metric, n)
                     angles.append(angle)
-                    metrics.append(metric_value)
-                    if metric_value > max_metric_val:
-                        max_metric_val = metric_value + 0.1
-                angles = np.array(angles)
-                metrics = np.array(metrics) 
-                ax.plot(angles,        metrics, linestyle='-',  label='Правило останова, $\\alpha = {}$'.format(n))
+                    values.append(val)
+                    # record for CSV
+                    rows.append({
+                        "rule_alpha": n,
+                        "threshold":  float(thr),
+                        "angle":      int(angle),
+                        metric:       float(val)
+                    })
+                    max_metric_val = max(max_metric_val, val + 0.1)
 
+                ax.plot(angles, values,
+                        linestyle='-',
+                        label=f'Правило останова, α={n}')
+
+            # style & save plot
             ax.set_xscale('log', base=2)
             ax.set_xticks(angles_gt[3:])
             ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
             ax.set_xlabel("Количество углов")
             ax.set_ylabel(f"Среднее значение {metric.title()}")
+            ax.set_ylim(0.4 if "beta_niblack" in algorithm else 0.6, 0.75 if "beta_niblack" in algorithm else 1)
             ax.grid(axis='y', linestyle='--', alpha=0.5)
             ax.grid(axis='x', linestyle='--', alpha=0.5)
             ax.legend()
             plt.tight_layout()
-            plt.legend()
-            folder = config.VISUALIZATION_PATH / "threshold" / algorithm
-            makedirs(folder, exist_ok=True)
-            plt.savefig("{0}/{1}_threshold.png".format(folder, metric))
 
+            out_dir = config.VISUALIZATION_PATH / "threshold" / algorithm
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            # 1) save the plot
+            plt.savefig(out_dir / f"{metric}_threshold.png")
+
+            # 2) save the CSV
+            df = pd.DataFrame(rows)
+            df.to_csv(out_dir / f"{metric}_thresholds.csv", index=False)
+
+            plt.close(fig)
     # for metric in ["iou", "boundarydice", "mse"]:
     #     stacked_threshold_plots(
     #         metrics_data=metrics_data,
